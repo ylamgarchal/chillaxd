@@ -386,7 +386,7 @@ class Server(object):
             raise InvalidState(
                 "Invalid state '%d' while sending heartbeat.")
         LOG.info("send heartbeat, term='%d'" % self._current_term)
-        heartbeat = message.build_append_entry(self._current_term, "")
+        heartbeat = message.build_append_entry(self._current_term, None)
         self._broadcast_message(heartbeat)
 
     def _election_timeout_task(self):
@@ -396,7 +396,7 @@ class Server(object):
         node then switch safely to leader. If the leader had not sent
         heartbeats then switch to candidate state.
         """
-        if self._state == Server.CANDIDATE:
+        if self._state == Server.LEADER:
             raise InvalidState(
                 "Invalid state '%d' while checking election timeout.")
 
@@ -473,7 +473,7 @@ class Server(object):
         self._voters.clear()
         self._voters.add(self._local_server_endpoint)
         self._voted_for = self._local_server_endpoint
-        rv_message = message.build_request_vote(self._current_term, "")
+        rv_message = message.build_request_vote(self._current_term, None)
         self._broadcast_message(rv_message)
         new_election_timeout = random.randint(_MIN_ELECTION_TIMEOUT,
                                               _MAX_ELECTION_TIMEOUT)
@@ -482,4 +482,5 @@ class Server(object):
 
 
 class InvalidState(Exception):
-    pass
+    """Exception raised when the server try to perform an action which
+    is not defined in its current state."""

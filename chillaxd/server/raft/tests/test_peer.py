@@ -22,7 +22,7 @@ import zmq
 
 class TestPeer(object):
 
-    def test_instantiation(self):
+    def test_init(self):
         testPeer = peer.Peer(zmq.Context.instance(), "local_identity",
                              "peer_identity")
         assert isinstance(testPeer._context, zmq.Context)
