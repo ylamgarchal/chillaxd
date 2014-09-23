@@ -1,5 +1,4 @@
-[![Build Status](https://api.travis-ci.org/ylamgarchal/chillaxd.png)](https://api.travis-ci.org/ylamgarchal/chillaxd)
-# Chillaxd
+# Chillaxd [![Build Status](https://api.travis-ci.org/ylamgarchal/chillaxd.png)](https://api.travis-ci.org/ylamgarchal/chillaxd)
 
 Chillaxd is a Python distributed coordination framework based on ZeroMQ and RAFT consensus algorithm.
 

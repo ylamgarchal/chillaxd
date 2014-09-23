@@ -339,7 +339,7 @@ class Server(object):
             self._voted_for = m_identifier
         else:
             # If we received the request in the current term and we had not
-            # yet voted then for this candidate otherwise deny the vote.
+            # yet voted then vote for this candidate otherwise deny the vote.
             if not self._voted_for:
                 LOG.debug("request vote granted to '%s'" % m_identifier)
                 rv_response = message.build_request_vote_response(
