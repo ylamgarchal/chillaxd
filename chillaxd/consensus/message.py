@@ -15,31 +15,32 @@
 
 import msgpack
 
-# The different message types according to RAFT
-# protocol, it uses MessagePack to serialize the messages.
-APPEND_ENTRY = 1
+# The different message types according to RAFT.
+APPEND_ENTRY_REQUEST = 1
 APPEND_ENTRY_RESPONSE = 2
 REQUEST_VOTE = 3
 REQUEST_VOTE_RESPONSE = 4
 
 
-def build_append_entry(term, payload):
-    append_entry = (APPEND_ENTRY, term, payload)
-    return msgpack.packb(append_entry)
+def build_append_entry_request(term, prev_log_index, prev_log_term,
+                               commit_index, entries):
+    append_entry_request = (APPEND_ENTRY_REQUEST, term, prev_log_index,
+                            prev_log_term, commit_index, entries)
+    return msgpack.packb(append_entry_request)
 
 
-def build_append_entry_response(term, payload):
-    append_entry_response = (APPEND_ENTRY_RESPONSE, term, payload)
+def build_append_entry_response(term, success):
+    append_entry_response = (APPEND_ENTRY_RESPONSE, term, success)
     return msgpack.packb(append_entry_response)
 
 
-def build_request_vote(term, payload):
-    request_vote = (REQUEST_VOTE, term, payload)
+def build_request_vote(term, last_log_index, last_log_term):
+    request_vote = (REQUEST_VOTE, term, last_log_index, last_log_term)
     return msgpack.packb(request_vote)
 
 
-def build_request_vote_response(term, payload):
-    request_vote_response = (REQUEST_VOTE_RESPONSE, term, payload)
+def build_request_vote_response(term, vote_granted):
+    request_vote_response = (REQUEST_VOTE_RESPONSE, term, vote_granted)
     return msgpack.packb(request_vote_response)
 
 

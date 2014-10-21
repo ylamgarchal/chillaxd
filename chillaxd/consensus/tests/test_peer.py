@@ -13,11 +13,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from chillaxd.server.raft import peer
-
 import mock
 import six
 import zmq
+
+from chillaxd.consensus import peer
 
 
 class TestPeer(object):
@@ -29,7 +29,7 @@ class TestPeer(object):
         assert testPeer._local_identity == "local_identity"
         assert testPeer._peer_identity == "peer_identity"
         assert not testPeer._is_started
-        assert testPeer._next_index == 0
+        assert testPeer._next_index == 1
         assert testPeer._match_index == 0
 
     def test_setup(self):

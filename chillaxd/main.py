@@ -13,12 +13,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import colorlog
-
 import logging
 import sys
 
-from server.raft import server
+import colorlog
+
+from chillaxd.consensus import raft
 
 
 def _setup_logging():
@@ -47,7 +47,7 @@ def main():
     test_local_endpoint = "127.0.0.1:%s" % sys.argv[1]
     test_remote_endpoints = {"127.0.0.1:%s" % sys.argv[2],
                              "127.0.0.1:%s" % sys.argv[3]}
-    chillax_server = server.Server(test_local_endpoint, test_remote_endpoints)
+    chillax_server = raft.Raft(test_local_endpoint, test_remote_endpoints)
     chillax_server.start()
 
 if __name__ == '__main__':

@@ -11,5 +11,5 @@ For more details on RAFT, you can read [In Search of an Understandable Consensus
 * ~~Cluster membership changes~~
 * ~~Log compaction~~
 
-[raft-paper]: https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf
+[raft-paper]: https://ramcloud.stanford.edu/raft.pdf
 
