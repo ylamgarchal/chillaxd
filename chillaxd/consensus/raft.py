@@ -45,7 +45,7 @@ class Raft(object):
     CANDIDATE = 2
     FOLLOWER = 3
 
-    def __init__(self, local_server_endpoint, remote_server_endpoints=set()):
+    def __init__(self, local_server_endpoint, remote_server_endpoints=None):
         """Init consensus server.
 
         :param local_server_endpoint: The endpoint on which the server will
@@ -56,6 +56,9 @@ class Raft(object):
         :type remote_server_endpoints: set
         """
         super(Raft, self).__init__()
+
+        if remote_server_endpoints is None:
+            remote_server_endpoints = set()
 
         self._local_server_endpoint = local_server_endpoint
         self._remote_server_endpoints = remote_server_endpoints
