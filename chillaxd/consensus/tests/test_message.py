@@ -17,28 +17,28 @@ from chillaxd.consensus import message
 
 
 def test_build_append_entry_request():
-    test_params = (0, 1, 2, 3, (4, 5))
+    test_params = (1, 1, 2, 3, (4, 5))
     ae_message = message.build_append_entry_request(*test_params)
     decoded_message = message.decode_message(ae_message)
-    assert ((message.APPEND_ENTRY_REQUEST,) + test_params) == decoded_message
+    assert (message.APPEND_ENTRY_REQUEST, test_params) == decoded_message
 
 
 def test_build_append_entry_response():
-    test_params = (0, True)
+    test_params = (0, True, 0)
     aer_message = message.build_append_entry_response(*test_params)
     decoded_message = message.decode_message(aer_message)
-    assert ((message.APPEND_ENTRY_RESPONSE,) + test_params) == decoded_message
+    assert (message.APPEND_ENTRY_RESPONSE, test_params) == decoded_message
 
 
 def test_build_request_vote():
     test_params = (0, 1, 2)
     rv_message = message.build_request_vote(*test_params)
     decoded_message = message.decode_message(rv_message)
-    assert ((message.REQUEST_VOTE,) + test_params) == decoded_message
+    assert (message.REQUEST_VOTE, test_params) == decoded_message
 
 
 def test_build_request_vote_response():
     test_params = (0, False)
     rvr_message = message.build_request_vote_response(*test_params)
     decoded_message = message.decode_message(rvr_message)
-    assert ((message.REQUEST_VOTE_RESPONSE,) + test_params) == decoded_message
+    assert (message.REQUEST_VOTE_RESPONSE, test_params) == decoded_message

@@ -54,7 +54,6 @@ class DataTree(object):
         if not parent:
             raise NoNodeException()
 
-        # TODO(yassine): maybe lock the parent before to operate on it
         children = parent.get_children()
         if child_name in children:
             raise NodeExistsException()

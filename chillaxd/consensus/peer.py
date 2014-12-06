@@ -41,12 +41,6 @@ class Peer(object):
         self._local_identity = local_identity
         self._peer_identity = peer_identity
         self._is_started = False
-        # Index of the next log entry to send to that peer
-        # (initialized to leader last log index + 1)
-        self._next_index = 1
-        # Index of highest log entry known to be replicated on that peer
-        # (initialized to 0, increases monotonically)
-        self._match_index = 0
 
     def _setup(self):
         """Setup the attributes.

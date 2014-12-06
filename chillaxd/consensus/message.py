@@ -29,8 +29,9 @@ def build_append_entry_request(term, prev_log_index, prev_log_term,
     return msgpack.packb(append_entry_request)
 
 
-def build_append_entry_response(term, success):
-    append_entry_response = (APPEND_ENTRY_RESPONSE, term, success)
+def build_append_entry_response(term, success, last_log_index):
+    append_entry_response = (APPEND_ENTRY_RESPONSE, term, success,
+                             last_log_index)
     return msgpack.packb(append_entry_response)
 
 
@@ -45,4 +46,12 @@ def build_request_vote_response(term, vote_granted):
 
 
 def decode_message(message):
-    return msgpack.unpackb(message, use_list=False)
+    """Decode a message.
+
+    :param message: The message.
+    :type message: six.binary_type
+    :return: The decoded message in the form of
+    (MESSAGE TYPE, data1, ..., data2)
+    """
+    decoded_message = msgpack.unpackb(message, use_list=False)
+    return decoded_message[0], decoded_message[1:]

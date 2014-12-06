@@ -15,9 +15,9 @@
 
 import mock
 import pytest
+import signal
 import six
 import zmq
-from chillaxd.consensus import log
 from chillaxd.consensus import peer
 from chillaxd.consensus import raft
 
@@ -30,83 +30,84 @@ class TestServer(object):
         self.test_server = raft.Raft("127.0.0.1:2406", {"127.0.0.1:2407",
                                                         "127.0.0.1:2408"})
 
-    def test_init(self):
-
-        assert self.test_server._local_server_endpoint == "127.0.0.1:2406"
-        assert self.test_server._remote_server_endpoints == {"127.0.0.1:2407",
-                                                             "127.0.0.1:2408"}
-        assert self.test_server._remote_servers == {}
-        assert self.test_server._quorum == 2
-        assert self.test_server._check_leader_timeout is None
-        assert self.test_server._heartbeating is None
-        assert self.test_server._state == raft.Raft.FOLLOWER
-        assert self.test_server._leader is None
-        assert self.test_server._voters == set()
-        assert self.test_server._voted_for is None
-        assert isinstance(self.test_server._log, log.RaftLog)
-        assert self.test_server._current_term == 0
-        assert self.test_server._commit_index == 0
-        assert self.test_server._last_applied == 0
-        assert self.test_server._context is None
-        assert self.test_server._zmq_ioloop is None
-        assert self.test_server._socket_for_consensus is None
-        assert self.test_server._is_started is False
-
     @mock.patch("chillaxd.consensus.raft.zmq.eventloop.ioloop.ZMQIOLoop",
                 spec=zmq.eventloop.ioloop.ZMQIOLoop)
     @mock.patch("chillaxd.consensus.raft.zmq.Context", spec=zmq.Context)
-    def test_setup(self, zmq_context, zmq_ioloop):
+    def test_setup(self, m_zmq_context, m_zmq_ioloop):
 
         self.test_server._setup()
-        zmq_context.assert_called_once_with()
+        m_zmq_context.assert_called_once_with()
 
-        for remote_server in six.itervalues(self.test_server._remote_servers):
-            assert isinstance(remote_server, peer.Peer)
-        assert len(self.test_server._remote_servers) == 2
+        remote_server_endpoints = self.test_server._remote_server_endpoints
+        for remote_server_endpoint in remote_server_endpoints:
+            b_r_s_e = six.b(remote_server_endpoint)
 
-        ioloop_instance = zmq_ioloop().instance
+            assert isinstance(self.test_server._remote_peers[b_r_s_e],
+                              peer.Peer)
+            assert self.test_server._next_index[b_r_s_e] == 1
+            assert self.test_server._match_index[b_r_s_e] == 0
+
+        assert len(self.test_server._remote_peers) == 2
+
+        ioloop_instance = m_zmq_ioloop().instance
         ioloop_instance.assert_called_once_with()
         assert ioloop_instance().add_handler.call_count == 2
 
-        assert isinstance(self.test_server._check_leader_timeout,
+        assert isinstance(self.test_server._checking_leader_timeout,
                           zmq.eventloop.ioloop.PeriodicCallback)
 
-        assert (self.test_server._check_leader_timeout.callback ==
+        assert (self.test_server._checking_leader_timeout.callback ==
                 self.test_server._election_timeout_task)
 
         assert (self.test_server._heartbeating.callback ==
-                self.test_server._send_heartbeat)
+                self.test_server._broadcast_ae_heartbeat)
 
+    @mock.patch("chillaxd.consensus.raft.signal", spec=signal)
     @mock.patch(
         "chillaxd.consensus.raft.zmq.eventloop.ioloop.PeriodicCallback",
         spec=zmq.eventloop.ioloop.PeriodicCallback)
     @mock.patch("chillaxd.consensus.raft.zmq.eventloop.ioloop.ZMQIOLoop",
                 spec=zmq.eventloop.ioloop.ZMQIOLoop)
     @mock.patch("chillaxd.consensus.raft.zmq.Context", spec=zmq.Context)
-    def test_start(self, zmq_context, zmq_ioloop, zmq_periodic_callback):
+    def test_start(self, m_zmq_context, m_zmq_ioloop, m_zmq_periodic_callback,
+                   m_signal):
         self.test_server.start()
-        assert zmq_context().socket().bind.call_count == 2
-
-        for remote_server in six.itervalues(self.test_server._remote_servers):
+        assert m_zmq_context().socket().bind.call_count == 2
+        assert m_signal.signal.call_count == 2
+        for remote_server in six.itervalues(self.test_server._remote_peers):
                 assert remote_server._is_started is True
         assert self.test_server._is_started is True
-        zmq_ioloop().instance().start.assert_called_once_with()
+        m_zmq_ioloop().instance().start.assert_called_once_with()
 
+    @mock.patch("chillaxd.consensus.raft.signal", spec=signal)
     @mock.patch(
         "chillaxd.consensus.raft.zmq.eventloop.ioloop.PeriodicCallback",
         spec=zmq.eventloop.ioloop.PeriodicCallback)
     @mock.patch("chillaxd.consensus.raft.zmq.eventloop.ioloop.ZMQIOLoop",
                 spec=zmq.eventloop.ioloop.ZMQIOLoop)
     @mock.patch("chillaxd.consensus.raft.zmq.Context", spec=zmq.Context)
-    def test_stop(self, zmq_context, zmq_ioloop, zmq_periodic_callback):
+    def test_stop(self, m_zmq_context, m_zmq_ioloop, m_zmq_periodic_callback,
+                  m_signal):
         self.test_server.start()
+
+        self.test_server._checking_leader_timeout = mock.Mock()
+        self.test_server._heartbeating = mock.Mock()
+        self.test_server._socket_for_commands = mock.Mock()
+        self.test_server._socket_for_consensus = mock.Mock()
+
         self.test_server.stop()
 
-        for remote_server in six.itervalues(self.test_server._remote_servers):
+        (self.test_server._checking_leader_timeout.stop.
+         assert_called_once_with())
+        self.test_server._heartbeating.stop.assert_called_once_with()
+        self.test_server._socket_for_commands.close.assert_called_once_with()
+        self.test_server._socket_for_consensus.close.assert_called_once_with()
+
+        for remote_server in six.itervalues(self.test_server._remote_peers):
                 assert remote_server._is_started is False
 
-        zmq_context().destroy.assert_called_once_with(linger=0)
-        zmq_ioloop().instance().stop.assert_called_once_with()
+        m_zmq_context().destroy.assert_called_once_with(linger=0)
+        m_zmq_ioloop().instance().stop.assert_called_once_with()
         assert self.test_server._is_started is False
 
     @mock.patch(
@@ -135,28 +136,25 @@ class TestServer(object):
                                                          zmq.POLLIN)
         self.test_server._handle_as_follower.assert_called_once_with(
             "server_identifier", "payload")
-        assert self.test_server._handle_as_follower.call_count == 1
         assert self.test_server._handle_as_candidate.call_count == 0
         assert self.test_server._handle_as_leader.call_count == 0
 
         self.test_server._handle_as_follower.reset_mock()
-        self.test_server._state = raft.Raft.LEADER
+        self.test_server._state = raft.Raft._LEADER
         self.test_server._dispatch_internal_raft_message(mock_socket,
                                                          zmq.POLLIN)
         self.test_server._handle_as_leader.assert_called_once_with(
             "server_identifier", "payload")
         assert self.test_server._handle_as_follower.call_count == 0
         assert self.test_server._handle_as_candidate.call_count == 0
-        assert self.test_server._handle_as_leader.call_count == 1
 
         self.test_server._handle_as_leader.reset_mock()
-        self.test_server._state = raft.Raft.CANDIDATE
+        self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._dispatch_internal_raft_message(mock_socket,
                                                          zmq.POLLIN)
         self.test_server._handle_as_candidate.assert_called_once_with(
             "server_identifier", "payload")
         assert self.test_server._handle_as_follower.call_count == 0
-        assert self.test_server._handle_as_candidate.call_count == 1
         assert self.test_server._handle_as_leader.call_count == 0
 
         self.test_server._handle_as_candidate.reset_mock()
@@ -174,134 +172,172 @@ class TestServer(object):
         self.test_server._process_request_vote = mock.Mock()
         self.test_server._process_request_vote_response = mock.Mock()
 
-        aereq_message = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*aereq_message)
+        aereq = (1, 2, 3, 4, ())
+        aer_packed = message.build_append_entry_request(*aereq)
 
         self.test_server._handle_as_leader("test_identifier", aer_packed)
         self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *aereq_message)
+            "test_identifier", *aereq)
+        self.test_server._process_append_entry_request.reset_mock()
 
-        aeresp = (1, True)
+        aeresp = (1, True, 0)
         aeresp_packed = message.build_append_entry_response(*aeresp)
         self.test_server._handle_as_leader("test_identifier", aeresp_packed)
         self.test_server._process_append_entry_response.\
             assert_called_once_with("test_identifier", *aeresp)
+        self.test_server._process_append_entry_response.reset_mock()
 
         rv = (1, 2, 3)
         rv_packed = message.build_request_vote(*rv)
         self.test_server._handle_as_leader("test_identifier", rv_packed)
         self.test_server._process_request_vote.assert_called_once_with(
             "test_identifier", *rv)
+        self.test_server._process_request_vote.reset_mock()
+
+        rvresp = (0, False)
+        rvresp_packed = message.build_request_vote_response(*rvresp)
+        self.test_server._handle_as_leader("test_identifier", rvresp_packed)
+        assert self.test_server._process_append_entry_request.call_count == 0
+        assert self.test_server._process_append_entry_response.call_count == 0
+        assert self.test_server._process_request_vote.call_count == 0
+        assert self.test_server._process_request_vote_response.call_count == 0
 
     def test_handle_as_follower(self):
 
         self.test_server._process_append_entry_request = mock.Mock()
         self.test_server._process_request_vote = mock.Mock()
+        self.test_server._process_request_vote_response = mock.Mock()
 
-        aereq_message = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*aereq_message)
+        aereq = (1, 2, 3, 4, ())
+        aer_packed = message.build_append_entry_request(*aereq)
         self.test_server._handle_as_follower("test_identifier", aer_packed)
         self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *aereq_message)
+            "test_identifier", *aereq)
+        self.test_server._process_append_entry_request.reset_mock()
 
-        rv_message = (1, 2, 3)
-        rv_packed = message.build_request_vote(*rv_message)
+        rv = (1, 2, 3)
+        rv_packed = message.build_request_vote(*rv)
         self.test_server._handle_as_follower("test_identifier", rv_packed)
         self.test_server._process_request_vote.assert_called_once_with(
-            "test_identifier", *rv_message)
-
-        self.test_server._process_append_entry_request.reset_mock()
+            "test_identifier", *rv)
         self.test_server._process_request_vote.reset_mock()
+
+        rvresp = (0, False)
+        rvresp_packed = message.build_request_vote_response(*rvresp)
+        self.test_server._handle_as_follower("test_identifier", rvresp_packed)
+        self.test_server._process_append_entry_request.call_count == 0
+        self.test_server._process_request_vote.call_count == 0
+        self.test_server._process_request_vote_response.call_count == 0
 
     def test_handle_as_candidate(self):
 
         self.test_server._process_append_entry_request = mock.Mock()
         self.test_server._process_request_vote = mock.Mock()
         self.test_server._process_request_vote_response = mock.Mock()
+        self.test_server._process_append_entry_response = mock.Mock()
 
-        ae_req_message = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*ae_req_message)
+        ae_req = (1, 2, 3, 4, ())
+        aer_packed = message.build_append_entry_request(*ae_req)
         self.test_server._handle_as_candidate("test_identifier", aer_packed)
         self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *ae_req_message)
+            "test_identifier", *ae_req)
+        self.test_server._process_append_entry_request.reset_mock()
 
-        rv_message = (1, 2, 3)
-        rv_packed = message.build_request_vote(*rv_message)
+        rv = (1, 2, 3)
+        rv_packed = message.build_request_vote(*rv)
         self.test_server._handle_as_candidate("test_identifier", rv_packed)
         self.test_server._process_request_vote.assert_called_once_with(
-            "test_identifier", *rv_message)
+            "test_identifier", *rv)
+        self.test_server._process_request_vote.reset_mock()
 
-        rv_resp_message = (1, True)
-        rvr_packed = message.build_request_vote_response(*rv_resp_message)
-        self.test_server._handle_as_candidate("test_identifier", rvr_packed)
+        rvresp = (1, True)
+        rvresp_packed = message.build_request_vote_response(*rvresp)
+        self.test_server._handle_as_candidate("test_identifier", rvresp_packed)
         self.test_server._process_request_vote_response.\
-            assert_called_once_with("test_identifier", *rv_resp_message)
+            assert_called_once_with("test_identifier", *rvresp)
+        self.test_server._process_request_vote_response.reset_mock()
+
+        aeresp = (1, True, 0)
+        aeresp_packed = message.build_append_entry_response(*aeresp)
+        self.test_server._handle_as_candidate("test_identifier", aeresp_packed)
+        assert self.test_server._process_append_entry_response.call_count == 0
 
     def test_process_append_entry_request(self):
 
-        self.test_server._remote_servers = mock.MagicMock()
+        self.test_server._remote_peers = mock.MagicMock()
         test_peer = mock.Mock(spec=peer.Peer)
-        self.test_server._remote_servers.__getitem__.return_value = test_peer
+        self.test_server._remote_peers.__getitem__.return_value = test_peer
 
         # stale term
-        ae_req_message = (-1, 2, 3, 4, ())
+        ae_req = (-1, 2, 3, 4, ())
         self.test_server._process_append_entry_request("test_identifier",
-                                                       *ae_req_message)
-        test_ae_response = message.build_append_entry_response(
-            self.test_server._current_term, False)
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+                                                       *ae_req)
+        ae_response = message.build_append_entry_response(
+            self.test_server._current_term, False, None)
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_peer.send_message.assert_called_once_with(test_ae_response)
-        self.test_server._remote_servers.__getitem__.reset_mock()
+        test_peer.send_message.assert_called_once_with(ae_response)
+        self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
 
         # current term outdated
-        ae_req_message = (2, 2, 3, 4, ())
+        ae_req = (2, 2, 3, 4, ())
         self.test_server._switch_to_follower = mock.Mock()
         self.test_server._process_append_entry_request("test_identifier",
-                                                       *ae_req_message)
+                                                       *ae_req)
         self.test_server._switch_to_follower.assert_called_once_with(
             2, "test_identifier")
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_ae_response = message.build_append_entry_response(
-            self.test_server._current_term, False)
-        test_peer.send_message.assert_called_once_with(test_ae_response)
-        self.test_server._remote_servers.__getitem__.reset_mock()
+        ae_response = message.build_append_entry_response(
+            self.test_server._current_term, False, None)
+        test_peer.send_message.assert_called_once_with(ae_response)
+        self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
         self.test_server._switch_to_follower.reset_mock()
 
         # equals terms as follower
-        ae_req_message = (0, -1, -1, 4, ())
+        ae_req = (0, 0, 0, 4, ())
         self.test_server._process_append_entry_request("test_identifier",
-                                                       *ae_req_message)
+                                                       *ae_req)
         assert self.test_server._leader == "test_identifier"
-        test_ae_response = message.build_append_entry_response(
-            self.test_server._current_term, True)
-        test_peer.send_message.assert_called_once_with(test_ae_response)
+        ae_response = message.build_append_entry_response(
+            self.test_server._current_term, True, 0)
+        test_peer.send_message.assert_called_once_with(ae_response)
         test_peer.reset_mock()
 
         # equals terms as leader
-        ae_req_message = (0, -1, -1, 4, ())
-        self.test_server._state = raft.Raft.LEADER
+        ae_req = (0, 0, 0, 4, ())
+        self.test_server._state = raft.Raft._LEADER
         self.test_server._process_append_entry_request("test_identifier",
-                                                       *ae_req_message)
+                                                       *ae_req)
         assert self.test_server._leader == "test_identifier"
         self.test_server._switch_to_follower.assert_called_once_with(
             0, None)
         self.test_server._switch_to_follower.reset_mock()
 
         # equals terms as candidate
-        ae_req_message = (0, -1, -1, 4, ())
-        self.test_server._state = raft.Raft.CANDIDATE
+        ae_req = (0, 0, 0, 4, ())
+        self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._process_append_entry_request("test_identifier",
-                                                       *ae_req_message)
+                                                       *ae_req)
         assert self.test_server._leader == "test_identifier"
         self.test_server._switch_to_follower.assert_called_once_with(
             0, "test_identifier")
-        test_ae_response = message.build_append_entry_response(
-            self.test_server._current_term, True)
-        test_peer.send_message.assert_called_once_with(test_ae_response)
+        ae_response = message.build_append_entry_response(
+            self.test_server._current_term, True, 0)
+        test_peer.send_message.assert_called_once_with(ae_response)
+        test_peer.reset_mock()
+
+        # equals terms with induction failed
+        ae_req = (0, -1, -1, 4, ())
+        self.test_server._state = raft.Raft._FOLLOWER
+        self.test_server._process_append_entry_request("test_identifier",
+                                                       *ae_req)
+        assert self.test_server._leader == "test_identifier"
+        ae_response = message.build_append_entry_response(
+            self.test_server._current_term, False, None)
+        test_peer.send_message.assert_called_once_with(ae_response)
 
     # TODO(yassine)
     def test_process_append_entry_response(self):
@@ -309,20 +345,20 @@ class TestServer(object):
 
     def test_process_request_vote(self):
 
-        self.test_server._remote_servers = mock.MagicMock()
+        self.test_server._remote_peers = mock.MagicMock()
         test_peer = mock.Mock(spec=peer.Peer)
-        self.test_server._remote_servers.__getitem__.return_value = test_peer
+        self.test_server._remote_peers.__getitem__.return_value = test_peer
 
         # stale term
         ae_req_message = (-1, 2, 3)
         self.test_server._process_request_vote("test_identifier",
                                                *ae_req_message)
-        test_rv_response = message.build_request_vote_response(
+        rv_response = message.build_request_vote_response(
             self.test_server._current_term, False)
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_peer.send_message.assert_called_once_with(test_rv_response)
-        self.test_server._remote_servers.__getitem__.reset_mock()
+        test_peer.send_message.assert_called_once_with(rv_response)
+        self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
 
         # current term outdated
@@ -330,26 +366,26 @@ class TestServer(object):
         self.test_server._switch_to_follower = mock.Mock()
         self.test_server._process_request_vote("test_identifier",
                                                *ae_req_message)
-        test_rv_response = message.build_request_vote_response(
+        rv_response = message.build_request_vote_response(
             self.test_server._current_term, True)
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_peer.send_message.assert_called_once_with(test_rv_response)
-        self.test_server._remote_servers.__getitem__.reset_mock()
+        test_peer.send_message.assert_called_once_with(rv_response)
+        self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
         self.test_server._switch_to_follower.reset_mock()
 
         # equals term, not voted
-        ae_req_message = (0, -1, -1)
+        ae_req_message = (0, 1, 1)
         self.test_server._voted_for = None
         self.test_server._process_request_vote("test_identifier",
                                                *ae_req_message)
-        test_rv_response = message.build_request_vote_response(
+        rv_response = message.build_request_vote_response(
             self.test_server._current_term, True)
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_peer.send_message.assert_called_once_with(test_rv_response)
-        self.test_server._remote_servers.__getitem__.reset_mock()
+        test_peer.send_message.assert_called_once_with(rv_response)
+        self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
         assert self.test_server._voted_for == "test_identifier"
 
@@ -357,11 +393,11 @@ class TestServer(object):
         ae_req_message = (0, -1, -1)
         self.test_server._process_request_vote("test_identifier",
                                                *ae_req_message)
-        test_rv_response = message.build_request_vote_response(
+        rv_response = message.build_request_vote_response(
             self.test_server._current_term, False)
-        self.test_server._remote_servers.__getitem__.assert_called_once_with(
+        self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
-        test_peer.send_message.assert_called_once_with(test_rv_response)
+        test_peer.send_message.assert_called_once_with(rv_response)
 
     def test_process_request_vote_response(self):
         self.test_server = raft.Raft("127.0.0.1:2406")
@@ -397,26 +433,38 @@ class TestServer(object):
         assert self.test_server._switch_to_follower.call_count == 0
         assert self.test_server._switch_to_candidate.call_count == 0
 
-    def test_send_heartbeat(self):
-        pytest.raises(raft.InvalidState, self.test_server._send_heartbeat)
+    def test_broadcast_ae_heartbeat(self):
+        assert self.test_server._state != raft.Raft._LEADER
+        pytest.raises(raft.InvalidState,
+                      self.test_server._broadcast_ae_heartbeat)
 
-        self.test_server._state = raft.Raft.LEADER
-        self.test_server._broadcast_message = mock.Mock()
-        self.test_server._send_heartbeat()
-        test_heartbeat = message.build_append_entry_request(
-            self.test_server._current_term, -1, -1, 0, ())
-        self.test_server._broadcast_message.assert_called_once_with(
-            test_heartbeat)
+        self.test_server._state = raft.Raft._LEADER
+        ae_heartbeat = message.build_append_entry_request(
+            self.test_server._current_term, 0, 0, 0, ())
+
+        for remote_server in range(3):
+            ts = self.test_server
+            ts._remote_peers[remote_server] = mock.Mock()
+            ts._next_index[remote_server] = 1
+            ts._log = mock.Mock()
+            ts._log.prev_index_and_term_of_entry.return_value = (0, 0)
+            ts._log.entries_from_index.return_value = ()
+
+        self.test_server._broadcast_ae_heartbeat()
+
+        for remote_server in range(3):
+            m_remote_server = self.test_server._remote_peers[remote_server]
+            m_remote_server.send_message.assert_called_once_with(ae_heartbeat)
 
     def test_election_timeout_task(self):
         self.test_server = raft.Raft("127.0.0.1:2406")
 
-        self.test_server._state = raft.Raft.LEADER
+        self.test_server._state = raft.Raft._LEADER
         pytest.raises(raft.InvalidState,
                       self.test_server._election_timeout_task)
 
         # with one node
-        self.test_server._state = raft.Raft.FOLLOWER
+        self.test_server._state = raft.Raft._FOLLOWER
         self.test_server._switch_to_leader = mock.Mock()
         self.test_server._switch_to_candidate = mock.Mock()
         self.test_server._election_timeout_task()
@@ -426,7 +474,7 @@ class TestServer(object):
         # with several nodes
         self.test_server = raft.Raft("127.0.0.1:2406", {"127.0.0.1:2407",
                                                         "127.0.0.1:2408"})
-        self.test_server._state = raft.Raft.FOLLOWER
+        self.test_server._state = raft.Raft._FOLLOWER
         self.test_server._switch_to_leader = mock.Mock()
         self.test_server._switch_to_candidate = mock.Mock()
         self.test_server._election_timeout_task()
@@ -434,82 +482,79 @@ class TestServer(object):
         assert self.test_server._switch_to_leader.call_count == 0
         assert self.test_server._leader is None
 
-    def test_broadcast_message(self):
-
-        test_peer_1 = mock.Mock(spec=peer.Peer)
-        test_peer_2 = mock.Mock(spec=peer.Peer)
-        self.test_server._remote_servers["127.0.0.1:2407"] = test_peer_1
-        self.test_server._remote_servers["127.0.0.1:2408"] = test_peer_2
-
-        self.test_server._broadcast_message(b"test_message")
-        test_peer_1.send_message.assert_called_once_with(b"test_message")
-        test_peer_2.send_message.assert_called_once_with(b"test_message")
-
     def test_switch_to_leader(self):
 
         pytest.raises(raft.InvalidState, self.test_server._switch_to_leader)
 
-        self.test_server._state = raft.Raft.CANDIDATE
+        self.test_server._state = raft.Raft._CANDIDATE
 
-        self.test_server._send_heartbeat = mock.Mock()
+        self.test_server._broadcast_ae_heartbeat = mock.Mock()
         self.test_server._heartbeating = mock.Mock()
-        self.test_server._check_leader_timeout = mock.Mock()
+        self.test_server._checking_leader_timeout = mock.Mock()
 
         self.test_server._switch_to_leader()
 
-        assert self.test_server._state == raft.Raft.LEADER
+        assert self.test_server._state == raft.Raft._LEADER
         assert len(self.test_server._voters) == 0
         assert self.test_server._voted_for is None
 
-        self.test_server._send_heartbeat.assert_called_once_with()
-        self.test_server._send_heartbeat.reset_mock()
+        self.test_server._broadcast_ae_heartbeat.assert_called_once_with()
         self.test_server._heartbeating.start.assert_called_once_with()
         self.test_server._heartbeating.reset_mock()
-        self.test_server._check_leader_timeout.stop.assert_called_once_with()
-        self.test_server._check_leader_timeout.reset_mock()
+        checking_leader_timeout = self.test_server._checking_leader_timeout
+        checking_leader_timeout.stop.assert_called_once_with()
+        self.test_server._checking_leader_timeout.reset_mock()
+        self.test_server._broadcast_ae_heartbeat.reset_mock()
 
         self.test_server._remote_server_endpoints = {}
-        self.test_server._state = raft.Raft.CANDIDATE
+        self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._switch_to_leader()
-        assert self.test_server._send_heartbeat.call_count == 0
+        assert self.test_server._broadcast_ae_heartbeat.call_count == 0
         assert self.test_server._heartbeating.start.call_count == 0
-        self.test_server._check_leader_timeout.stop.assert_called_once_with()
+        checking_leader_timeout = self.test_server._checking_leader_timeout
+        checking_leader_timeout.stop.assert_called_once_with()
 
     def test_switch_to_follower(self):
 
-        self.test_server._state = raft.Raft.LEADER
+        self.test_server._state = raft.Raft._LEADER
+        assert self.test_server._state != raft.Raft._FOLLOWER
 
         self.test_server._heartbeating = mock.Mock()
-        self.test_server._check_leader_timeout = mock.Mock()
+        self.test_server._checking_leader_timeout = mock.Mock()
 
         self.test_server._switch_to_follower(1, "new_leader")
 
-        assert self.test_server._state == raft.Raft.FOLLOWER
+        assert self.test_server._state == raft.Raft._FOLLOWER
         assert self.test_server._leader == "new_leader"
         assert self.test_server._current_term == 1
         assert len(self.test_server._voters) == 0
         assert self.test_server._voted_for is None
 
         self.test_server._heartbeating.stop.assert_called_once_with()
-        self.test_server._check_leader_timeout.start.assert_called_once_with()
+        checking_leader_timeout = self.test_server._checking_leader_timeout
+        checking_leader_timeout.start.assert_called_once_with()
 
     def test_switch_to_candidate(self):
 
-        self.test_server._state = -1
+        self.test_server._state = raft.Raft._LEADER
+
         pytest.raises(raft.InvalidState, self.test_server._switch_to_candidate)
 
-        self.test_server._state = raft.Raft.FOLLOWER
-        self.test_server._broadcast_message = mock.Mock()
-        self.test_server._check_leader_timeout = mock.Mock()
+        self.test_server._state = raft.Raft._FOLLOWER
+        self.test_server._broadcast_ae_heartbeat = mock.Mock()
+        self.test_server._checking_leader_timeout = mock.Mock()
+        for remote_server in range(3):
+            self.test_server._remote_peers[remote_server] = mock.Mock()
 
         self.test_server._switch_to_candidate()
 
         assert (self.test_server._voters ==
                 {self.test_server._local_server_endpoint})
-        assert self.test_server._state == raft.Raft.CANDIDATE
+        assert self.test_server._state == raft.Raft._CANDIDATE
         assert (self.test_server._voted_for ==
                 self.test_server._local_server_endpoint)
-        rv_message = message.build_request_vote(self.test_server._current_term,
-                                                -1, -1)
-        self.test_server._broadcast_message.assert_called_once_with(rv_message)
-        assert self.test_server._check_leader_timeout.callback_time != 0
+        rv = message.build_request_vote(self.test_server._current_term, 0, 0)
+
+        for remote_server in range(3):
+            m_remote_server = self.test_server._remote_peers[remote_server]
+            m_remote_server.send_message.assert_called_once_with(rv)
