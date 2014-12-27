@@ -26,9 +26,17 @@ from chillaxd.consensus import message
 
 class TestServer(object):
 
+    _DEFAULT_ARGUMENTS = {'public_endpoint': '127.0.0.1:27001',
+                          'private_endpoint': '127.0.0.1:2406',
+                          'remote_endpoints': ['127.0.0.1:2407',
+                                               '127.0.0.1:2408'],
+                          'leader_heartbeat_interval': 50,
+                          'min_election_timeout': 200,
+                          'max_election_timeout': 300}
+
     def setup_method(self, method):
-        self.test_server = raft.Raft("127.0.0.1:2406", {"127.0.0.1:2407",
-                                                        "127.0.0.1:2408"})
+
+        self.test_server = raft.Raft(**TestServer._DEFAULT_ARGUMENTS)
 
     @mock.patch("chillaxd.consensus.raft.zmq.eventloop.ioloop.ZMQIOLoop",
                 spec=zmq.eventloop.ioloop.ZMQIOLoop)
@@ -38,14 +46,14 @@ class TestServer(object):
         self.test_server._setup()
         m_zmq_context.assert_called_once_with()
 
-        remote_server_endpoints = self.test_server._remote_server_endpoints
+        remote_server_endpoints = self.test_server._remote_endpoints
         for remote_server_endpoint in remote_server_endpoints:
-            b_r_s_e = six.b(remote_server_endpoint)
+            binary_r_e = six.b(remote_server_endpoint)
 
-            assert isinstance(self.test_server._remote_peers[b_r_s_e],
+            assert isinstance(self.test_server._remote_peers[binary_r_e],
                               peer.Peer)
-            assert self.test_server._next_index[b_r_s_e] == 1
-            assert self.test_server._match_index[b_r_s_e] == 0
+            assert self.test_server._next_index[binary_r_e] == 1
+            assert self.test_server._match_index[binary_r_e] == 0
 
         assert len(self.test_server._remote_peers) == 2
 
@@ -400,7 +408,10 @@ class TestServer(object):
         test_peer.send_message.assert_called_once_with(rv_response)
 
     def test_process_request_vote_response(self):
-        self.test_server = raft.Raft("127.0.0.1:2406")
+
+        test_args = TestServer._DEFAULT_ARGUMENTS.copy()
+        test_args["remote_endpoints"] = ["127.0.0.1:2406"]
+        self.test_server = raft.Raft(**test_args)
 
         # stale term
         self.test_server._switch_to_follower = mock.Mock()
@@ -419,10 +430,11 @@ class TestServer(object):
         self.test_server._switch_to_follower.reset_mock()
 
         # equals term with request vote granted with quorum
-        assert len(self.test_server._voters) == 0
+        self.test_server._voters = {"self.test_server"}
+        assert len(self.test_server._voters) == 1
         self.test_server._process_request_vote_response("test_identifier",
                                                         0, True)
-        assert self.test_server._voters == {"test_identifier"}
+        assert len(self.test_server._voters) == 2
         self.test_server._switch_to_leader.assert_called_once_with()
         self.test_server._switch_to_leader.reset_mock()
 
@@ -457,7 +469,9 @@ class TestServer(object):
             m_remote_server.send_message.assert_called_once_with(ae_heartbeat)
 
     def test_election_timeout_task(self):
-        self.test_server = raft.Raft("127.0.0.1:2406")
+        test_args = TestServer._DEFAULT_ARGUMENTS.copy()
+        test_args["remote_endpoints"] = []
+        self.test_server = raft.Raft(**test_args)
 
         self.test_server._state = raft.Raft._LEADER
         pytest.raises(raft.InvalidState,
@@ -472,8 +486,8 @@ class TestServer(object):
         assert self.test_server._switch_to_candidate.call_count == 0
 
         # with several nodes
-        self.test_server = raft.Raft("127.0.0.1:2406", {"127.0.0.1:2407",
-                                                        "127.0.0.1:2408"})
+        test_args["remote_endpoints"] = ["127.0.0.1:2407", "127.0.0.1:2408"]
+        self.test_server = raft.Raft(**test_args)
         self.test_server._state = raft.Raft._FOLLOWER
         self.test_server._switch_to_leader = mock.Mock()
         self.test_server._switch_to_candidate = mock.Mock()
@@ -506,7 +520,7 @@ class TestServer(object):
         self.test_server._checking_leader_timeout.reset_mock()
         self.test_server._broadcast_ae_heartbeat.reset_mock()
 
-        self.test_server._remote_server_endpoints = {}
+        self.test_server._remote_endpoints = {}
         self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._switch_to_leader()
         assert self.test_server._broadcast_ae_heartbeat.call_count == 0
@@ -549,10 +563,10 @@ class TestServer(object):
         self.test_server._switch_to_candidate()
 
         assert (self.test_server._voters ==
-                {self.test_server._local_server_endpoint})
+                {self.test_server._private_endpoint})
         assert self.test_server._state == raft.Raft._CANDIDATE
         assert (self.test_server._voted_for ==
-                self.test_server._local_server_endpoint)
+                self.test_server._private_endpoint)
         rv = message.build_request_vote(self.test_server._current_term, 0, 0)
 
         for remote_server in range(3):

@@ -1,5 +1,7 @@
 colorlog>=2.4.0
-pbr>=0.10.0
-six>=1.7.0
-pyzmq>=14.3.1
+docopt>=0.6.2
 msgpack-python>=0.4.2
+pbr>=0.10.0
+PyYAML
+pyzmq>=14.3.1
+six>=1.7.0

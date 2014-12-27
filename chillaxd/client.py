@@ -48,7 +48,7 @@ class ChillaxdClient(object):
         """Start the connection to Chillaxd server."""
         if not self._is_started:
             self._setup()
-            self._zmq_dealer.connect("ipc:///tmp/%s" %
+            self._zmq_dealer.connect("tcp://%s" %
                                      self._chillaxd_server_endpoint)
             self._is_started = True
             LOG.debug("connecting to chillaxd server '%s'" %
@@ -108,8 +108,7 @@ def _setup_logging():
 
 def main():
     _setup_logging()
-    chillaxd_endpoint = "127.0.0.1:%s" % sys.argv[1]
-    chillaxd_client = ChillaxdClient(chillaxd_endpoint)
+    chillaxd_client = ChillaxdClient(sys.argv[1])
     chillaxd_client.start()
 
     if sys.argv[2] == "create_node":

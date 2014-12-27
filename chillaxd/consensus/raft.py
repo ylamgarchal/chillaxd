@@ -31,10 +31,6 @@ from chillaxd import datatree
 
 LOG = logging.getLogger(__name__)
 
-_HEARTBEAT_INTERVAL = 10
-_MIN_ELECTION_TIMEOUT = 15
-_MAX_ELECTION_TIMEOUT = 20
-
 
 class Raft(object):
     """This class represents a server which implements the
@@ -45,34 +41,54 @@ class Raft(object):
     _CANDIDATE = "CANDIDATE"
     _FOLLOWER = "FOLLOWER"
 
-    def __init__(self, local_server_endpoint, remote_server_endpoints=None):
+    def __init__(self, private_endpoint, public_endpoint,
+                 remote_endpoints=None, leader_heartbeat_interval=50,
+                 min_election_timeout=200, max_election_timeout=300):
         """Init consensus server.
 
-        :param local_server_endpoint: The local endpoint on which the server
-        will bind to, in the form of "address ip:port".
-        :type local_server_endpoint: str
-        :param remote_server_endpoints: A set of endpoints corresponding to
+        :param private_endpoint: The private endpoint on which the
+        server will bind to, in the form of "address ip:port".
+        :type private_endpoint: str
+        :param public_endpoint: The public endpoint on which the
+        server will bind to, in the form of "address ip:port".
+        :type public_endpoint: str
+        :param remote_endpoints: A list of endpoints corresponding to
         the other peers.
-        :type remote_server_endpoints: set
+        :type remote_endpoints: list
+        :param leader_heartbeat_interval: The period of time between two
+        heartbeat from the leader.
+        :type leader_heartbeat_interval: int
+
+        :param min_election_timeout: The minimum value for the election
+        timeout.
+        :type min_election_timeout: int
+        :param max_election_timeout: The maximum value for the election
+        timeout.
+        :type max_election_timeout: int
         """
         super(Raft, self).__init__()
 
-        self._local_server_endpoint = local_server_endpoint
-        self._remote_server_endpoints = remote_server_endpoints or set()
+        self._private_endpoint = private_endpoint
+        self._public_endpoint = public_endpoint
+        self._remote_endpoints = remote_endpoints or []
+        self._leader_heartbeat_interval = leader_heartbeat_interval
+        self._min_election_timeout = min_election_timeout
+        self._max_election_timeout = max_election_timeout
+
         self._remote_peers = {}
 
         # A quorum is a majority that is necessary for moving forward.
-        self._quorum = int(((len(self._remote_server_endpoints) + 1) / 2)) + 1
+        self._quorum = int(((len(self._remote_endpoints) + 1) / 2)) + 1
 
         # A zmq timer that is activated when the server is not the leader
         # of the cluster. It periodically checks if the leader is alive with
-        # a period randomly chosen between _MIN_ELECTION_TIMEOUT and
-        # _MAX_ELECTION_TIMEOUT ms.
+        # a period randomly chosen between '_min_election_timeout' and
+        # '_max_election_timeout' ms.
         self._checking_leader_timeout = None
 
         # A zmq timer that is activated when the server is the leader
         # of the cluster. It periodically send heartbeats to other peers within
-        # a period defined by _HEARTBEAT_INTERVAL ms.
+        # a period defined by '_leader_heartbeat_interval' ms.
         self._heartbeating = None
 
         # The server state, initially a follower.
@@ -133,20 +149,20 @@ class Raft(object):
     def _setup(self):
         """Setup all the attributes.
 
-        Bind the server, connect to remote peers and
-        initiate the timers."""
+        Bind the server, connect to remote peers and initiate the timers.
+        """
 
         self._context = zmq.Context()
         self._socket_for_commands = self._context.socket(zmq.ROUTER)
         self._socket_for_consensus = self._context.socket(zmq.ROUTER)
-        for remote_server_endpoint in self._remote_server_endpoints:
+        for remote_endpoint in self._remote_endpoints:
             remote_peer = peer.Peer(self._context,
-                                    self._local_server_endpoint,
-                                    remote_server_endpoint)
-            b_r_s_e = six.b(remote_server_endpoint)
-            self._remote_peers[b_r_s_e] = remote_peer
-            self._next_index[b_r_s_e] = self._log.last_index() + 1
-            self._match_index[b_r_s_e] = 0
+                                    self._private_endpoint,
+                                    remote_endpoint)
+            binary_r_e = six.b(remote_endpoint)
+            self._remote_peers[binary_r_e] = remote_peer
+            self._next_index[binary_r_e] = self._log.last_index() + 1
+            self._match_index[binary_r_e] = 0
 
         self._zmq_ioloop = ioloop.ZMQIOLoop().instance()
         self._zmq_ioloop.add_handler(self._socket_for_commands,
@@ -157,11 +173,12 @@ class Raft(object):
                                      zmq.POLLIN)
         self._checking_leader_timeout = ioloop.PeriodicCallback(
             self._election_timeout_task,
-            random.randint(_MIN_ELECTION_TIMEOUT, _MAX_ELECTION_TIMEOUT),
+            random.randint(self._min_election_timeout,
+                           self._max_election_timeout),
             io_loop=self._zmq_ioloop)
         self._heartbeating = ioloop.PeriodicCallback(
             self._broadcast_ae_heartbeat,
-            _HEARTBEAT_INTERVAL,
+            self._leader_heartbeat_interval,
             io_loop=self._zmq_ioloop)
 
     def _handle_signals(self, sig, frame):
@@ -174,15 +191,15 @@ class Raft(object):
 
         if not self._is_started:
             LOG.info("let's chillax on '%s'..." %
-                     self._local_server_endpoint)
+                     self._public_endpoint)
             # On SIGINT or SIGTERM signals stop and exit gracefully
             signal.signal(signal.SIGINT, self._handle_signals)
             signal.signal(signal.SIGTERM, self._handle_signals)
             self._setup()
             self._socket_for_consensus.bind("tcp://%s" %
-                                            self._local_server_endpoint)
-            self._socket_for_commands.bind("ipc:///tmp/%s" %
-                                           self._local_server_endpoint)
+                                            self._private_endpoint)
+            self._socket_for_commands.bind("tcp://%s" %
+                                           self._public_endpoint)
             for remote_server in six.itervalues(self._remote_peers):
                 remote_server.start()
             self._is_started = True
@@ -571,7 +588,7 @@ class Raft(object):
         """Broadcast append entries to all peers.
 
         This method is periodically called by zmq timer within a period
-        equals to raft._HEARTBEAT_INTERVAL ms.
+        equals to '_leader_heartbeat_interval' ms.
         """
 
         if self._state != Raft._LEADER:
@@ -603,7 +620,7 @@ class Raft(object):
                 "Invalid state '%d' while checking election timeout.")
 
         if not self._leader:
-            if not len(self._remote_server_endpoints):
+            if not len(self._remote_endpoints):
                 self._switch_to_leader()
                 return
             self._switch_to_candidate()
@@ -623,7 +640,7 @@ class Raft(object):
         self._state = Raft._LEADER
         self._voters.clear()
         self._voted_for = None
-        if len(self._remote_server_endpoints):
+        if len(self._remote_endpoints):
             self._broadcast_ae_heartbeat()
             self._heartbeating.start()
         self._checking_leader_timeout.stop()
@@ -669,16 +686,16 @@ class Raft(object):
         self._state = Raft._CANDIDATE
         LOG.debug("switched to candidate, term='%d'" % self._current_term)
         self._voters.clear()
-        self._voters.add(self._local_server_endpoint)
-        self._voted_for = self._local_server_endpoint
+        self._voters.add(self._private_endpoint)
+        self._voted_for = self._private_endpoint
         l_l_i, l_l_t = self._log.index_and_term_of_last_entry()
         rv_message = message.build_request_vote(self._current_term, l_l_i,
                                                 l_l_t)
         # Broadcast request vote.
         for remote_server in six.itervalues(self._remote_peers):
             remote_server.send_message(rv_message)
-        new_election_timeout = random.randint(_MIN_ELECTION_TIMEOUT,
-                                              _MAX_ELECTION_TIMEOUT)
+        new_election_timeout = random.randint(self._min_election_timeout,
+                                              self._max_election_timeout)
         self._checking_leader_timeout.callback_time = new_election_timeout
         LOG.debug("new election timeout '%d'ms" % new_election_timeout)
 

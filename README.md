@@ -39,41 +39,46 @@ First, open four consoles, the three first console will print the servers logs
 while the fourth is used to run client commands.
 
 ```sh
-$ chillaxd-server 1234 1235 1236
+$ chillaxd --config-file=chillaxd_1.conf
+2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27001'...
 ```
 
 ```sh
-$ chillaxd-server 1235 1234 1236
+$ chillaxd --config-file=chillaxd_2.conf
+2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27002'...
 ```
 
 ```sh
-$ chillaxd-server 1236 1234 1235
+$ chillaxd --config-file=chillaxd_3.conf
+2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27003'...
 ```
 
 Now the cluster is up and running. The logs indicates which one is the current
 leader. Let's try to send some commands.
 
-For instance if the current leader is the one listening on port 1234.
+For instance if the current leader is the one listening on port 27001.
+
+**WARNING: for now, it's a minimalist client for demonstrating the replication mechanism.**
 
 ```sh
-$ chillaxd-client 1234 create_node /node_1  data_1
+$ chillaxdctl 127.0.0.1:27001 create_node /node_1  data_1
 ```
 
-We created a node on / named "node_1" associated to the data "data_1", we can
-then verify that this commands is replicated on each server.
+We created a node on the root "/" named "node_1" associated to the data "data_1", we
+can then verify that this commands is replicated on each server.
 
 ```sh
-$ chillaxd-client 1234 get_children /
+$ chillaxdctl 127.0.0.1:27001 get_children /
 ['node_1']
 ```
 
 ```sh
-$ chillaxd-client 1235 get_children /
+$ chillaxdctl 127.0.0.1:27002 get_children /
 ['node_1']
 ```
 
 ```sh
-$ chillaxd-client 1236 get_children /
+$ chillaxdctl 127.0.0.1:27003 get_children /
 ['node_1']
 ```
 

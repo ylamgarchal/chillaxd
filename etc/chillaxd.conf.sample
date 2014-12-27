@@ -1,0 +1,21 @@
+---
+# The addresses on which the server will bind on.
+bind_addresses:
+    # The public address used by clients to send commands.
+    public: 127.0.0.1:27001
+    # The private address used internally for the replication.
+    private: 127.0.0.1:2406
+
+# The addresses of the remote servers, it must be their private one.
+remote_servers:
+    - 127.0.0.1:2407
+    - 127.0.0.1:2408
+
+# Time parameters for the RAFT replication, in milliseconds.
+time_parameters:
+    # The period of time between two heartbeats.
+    leader_heartbeat_interval: 50
+    # A new election timeout is chosen between two values for each election,
+    # it must be superior the heartbeat interval.
+    min_election_timeout: 200
+    max_election_timeout: 300

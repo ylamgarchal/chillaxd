@@ -13,12 +13,32 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+"""Chillaxd server.
+
+Usage:
+  chillaxd [--config-file=<path>]
+  chillaxd (-h | --help)
+  chillaxd --version
+
+Options:
+  --config-file=<path>  The configuration file path
+                        [default: /etc/chillaxd/chillaxd.conf].
+  -h --help             Show this screen.
+  --version             Show version.
+"""
+
 import logging
 import sys
 
 import colorlog
+import docopt
+import yaml
 
 from chillaxd.consensus import raft
+
+LOG = logging.getLogger(__name__)
+
+_VERSION = '0.0.1'
 
 
 def _setup_logging():
@@ -42,13 +62,40 @@ def _setup_logging():
     logger.addHandler(stream_handler)
 
 
-def main():
+def _get_arguments(cli_arguments):
+    arguments = {}
+    config_file_path = cli_arguments["--config-file"]
+    if config_file_path:
+        try:
+            with open(config_file_path, "r") as config_file:
+                config = yaml.load(config_file)
+                arguments["private_endpoint"] = \
+                    config["bind_addresses"]["private"]
+                arguments["public_endpoint"] = \
+                    config["bind_addresses"]["public"]
+                arguments["remote_endpoints"] = config["remote_servers"]
+                arguments["leader_heartbeat_interval"] = \
+                    config["time_parameters"]["leader_heartbeat_interval"]
+                arguments["min_election_timeout"] = \
+                    config["time_parameters"]["min_election_timeout"]
+                arguments["max_election_timeout"] = \
+                    config["time_parameters"]["max_election_timeout"]
+        except (OSError, IOError) as e:
+            LOG.error("cannot open configuration file '%s'" % config_file_path)
+            sys.exit(e.errno)
+    return arguments
+
+
+def main(args=None):
+
     _setup_logging()
-    test_local_endpoint = "127.0.0.1:%s" % sys.argv[1]
-    test_remote_endpoints = {"127.0.0.1:%s" % sys.argv[2],
-                             "127.0.0.1:%s" % sys.argv[3]}
-    chillax_server = raft.Raft(test_local_endpoint, test_remote_endpoints)
+    cli_arguments = docopt.docopt(__doc__,
+                                  argv=args or sys.argv[1:],
+                                  version="Chillaxd %s" % _VERSION)
+    arguments = _get_arguments(cli_arguments)
+    chillax_server = raft.Raft(**arguments)
     chillax_server.start()
+
 
 if __name__ == '__main__':
     main()
