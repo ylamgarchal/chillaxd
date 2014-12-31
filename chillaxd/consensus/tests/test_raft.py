@@ -133,142 +133,47 @@ class TestServer(object):
 
     def test_dispatch_internal_raft_message(self):
 
-        self.test_server._handle_as_follower = mock.Mock()
-        self.test_server._handle_as_leader = mock.Mock()
-        self.test_server._handle_as_candidate = mock.Mock()
+        self.test_server._process_append_entry_request = mock.Mock()
+        self.test_server._process_append_entry_response = mock.Mock()
+        self.test_server._process_request_vote = mock.Mock()
+        self.test_server._process_request_vote_response = mock.Mock()
         mock_socket = mock.Mock(spec=zmq.sugar.socket.Socket)
-        mock_socket.recv_multipart.return_value = ("server_identifier",
-                                                   "payload")
 
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
-        self.test_server._handle_as_follower.assert_called_once_with(
-            "server_identifier", "payload")
-        assert self.test_server._handle_as_candidate.call_count == 0
-        assert self.test_server._handle_as_leader.call_count == 0
-
-        self.test_server._handle_as_follower.reset_mock()
-        self.test_server._state = raft.Raft._LEADER
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
-        self.test_server._handle_as_leader.assert_called_once_with(
-            "server_identifier", "payload")
-        assert self.test_server._handle_as_follower.call_count == 0
-        assert self.test_server._handle_as_candidate.call_count == 0
-
-        self.test_server._handle_as_leader.reset_mock()
-        self.test_server._state = raft.Raft._CANDIDATE
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
-        self.test_server._handle_as_candidate.assert_called_once_with(
-            "server_identifier", "payload")
-        assert self.test_server._handle_as_follower.call_count == 0
-        assert self.test_server._handle_as_leader.call_count == 0
-
-        self.test_server._handle_as_candidate.reset_mock()
-        self.test_server._state = -1
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
-        assert self.test_server._handle_as_follower.call_count == 0
-        assert self.test_server._handle_as_candidate.call_count == 0
-        assert self.test_server._handle_as_leader.call_count == 0
-
-    def test_handle_as_leader(self):
-
-        self.test_server._process_append_entry_request = mock.Mock()
-        self.test_server._process_append_entry_response = mock.Mock()
-        self.test_server._process_request_vote = mock.Mock()
-        self.test_server._process_request_vote_response = mock.Mock()
-
+        # Append entry request.
         aereq = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*aereq)
-
-        self.test_server._handle_as_leader("test_identifier", aer_packed)
+        aereq_packed = message.build_append_entry_request(*aereq)
+        mock_socket.recv_multipart.return_value = ("identifier", aereq_packed)
+        self.test_server._dispatch_internal_raft_message(mock_socket,
+                                                         zmq.POLLIN)
         self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *aereq)
-        self.test_server._process_append_entry_request.reset_mock()
+            "identifier", *aereq)
 
+        # Append entry response.
         aeresp = (1, True, 0)
         aeresp_packed = message.build_append_entry_response(*aeresp)
-        self.test_server._handle_as_leader("test_identifier", aeresp_packed)
+        mock_socket.recv_multipart.return_value = ("identifier", aeresp_packed)
+        self.test_server._dispatch_internal_raft_message(mock_socket,
+                                                         zmq.POLLIN)
         self.test_server._process_append_entry_response.\
-            assert_called_once_with("test_identifier", *aeresp)
-        self.test_server._process_append_entry_response.reset_mock()
+            assert_called_once_with("identifier", *aeresp)
 
+        # Request vote.
         rv = (1, 2, 3)
         rv_packed = message.build_request_vote(*rv)
-        self.test_server._handle_as_leader("test_identifier", rv_packed)
+        mock_socket.recv_multipart.return_value = ("identifier", rv_packed)
+        self.test_server._dispatch_internal_raft_message(mock_socket,
+                                                         zmq.POLLIN)
         self.test_server._process_request_vote.assert_called_once_with(
-            "test_identifier", *rv)
-        self.test_server._process_request_vote.reset_mock()
+            "identifier", *rv)
 
+        # Request vote response.
         rvresp = (0, False)
         rvresp_packed = message.build_request_vote_response(*rvresp)
-        self.test_server._handle_as_leader("test_identifier", rvresp_packed)
-        assert self.test_server._process_append_entry_request.call_count == 0
-        assert self.test_server._process_append_entry_response.call_count == 0
-        assert self.test_server._process_request_vote.call_count == 0
-        assert self.test_server._process_request_vote_response.call_count == 0
-
-    def test_handle_as_follower(self):
-
-        self.test_server._process_append_entry_request = mock.Mock()
-        self.test_server._process_request_vote = mock.Mock()
-        self.test_server._process_request_vote_response = mock.Mock()
-
-        aereq = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*aereq)
-        self.test_server._handle_as_follower("test_identifier", aer_packed)
-        self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *aereq)
-        self.test_server._process_append_entry_request.reset_mock()
-
-        rv = (1, 2, 3)
-        rv_packed = message.build_request_vote(*rv)
-        self.test_server._handle_as_follower("test_identifier", rv_packed)
-        self.test_server._process_request_vote.assert_called_once_with(
-            "test_identifier", *rv)
-        self.test_server._process_request_vote.reset_mock()
-
-        rvresp = (0, False)
-        rvresp_packed = message.build_request_vote_response(*rvresp)
-        self.test_server._handle_as_follower("test_identifier", rvresp_packed)
-        self.test_server._process_append_entry_request.call_count == 0
-        self.test_server._process_request_vote.call_count == 0
-        self.test_server._process_request_vote_response.call_count == 0
-
-    def test_handle_as_candidate(self):
-
-        self.test_server._process_append_entry_request = mock.Mock()
-        self.test_server._process_request_vote = mock.Mock()
-        self.test_server._process_request_vote_response = mock.Mock()
-        self.test_server._process_append_entry_response = mock.Mock()
-
-        ae_req = (1, 2, 3, 4, ())
-        aer_packed = message.build_append_entry_request(*ae_req)
-        self.test_server._handle_as_candidate("test_identifier", aer_packed)
-        self.test_server._process_append_entry_request.assert_called_once_with(
-            "test_identifier", *ae_req)
-        self.test_server._process_append_entry_request.reset_mock()
-
-        rv = (1, 2, 3)
-        rv_packed = message.build_request_vote(*rv)
-        self.test_server._handle_as_candidate("test_identifier", rv_packed)
-        self.test_server._process_request_vote.assert_called_once_with(
-            "test_identifier", *rv)
-        self.test_server._process_request_vote.reset_mock()
-
-        rvresp = (1, True)
-        rvresp_packed = message.build_request_vote_response(*rvresp)
-        self.test_server._handle_as_candidate("test_identifier", rvresp_packed)
+        mock_socket.recv_multipart.return_value = ("identifier", rvresp_packed)
+        self.test_server._dispatch_internal_raft_message(mock_socket,
+                                                         zmq.POLLIN)
         self.test_server._process_request_vote_response.\
-            assert_called_once_with("test_identifier", *rvresp)
-        self.test_server._process_request_vote_response.reset_mock()
-
-        aeresp = (1, True, 0)
-        aeresp_packed = message.build_append_entry_response(*aeresp)
-        self.test_server._handle_as_candidate("test_identifier", aeresp_packed)
-        assert self.test_server._process_append_entry_response.call_count == 0
+            assert_called_once_with("identifier", *rvresp)
 
     def test_process_append_entry_request(self):
 
@@ -424,6 +329,7 @@ class TestServer(object):
         assert self.test_server._switch_to_candidate.call_count == 0
 
         # current term outdated
+        self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._process_request_vote_response("test_identifier",
                                                         1, True)
         self.test_server._switch_to_follower.assert_called_once_with(1, None)

@@ -258,7 +258,7 @@ class Raft(object):
 
     def _dispatch_internal_raft_message(self, socket, event):
         """Decode the received message and dispatch it on the corresponding
-        handler according to the current state.
+        handler.
 
         :param socket: The zmq.ROUTER socket.
         :type socket: zmq.sugar.socket.Socket
@@ -270,80 +270,21 @@ class Raft(object):
         zmq_message = socket.recv_multipart()
 
         # TODO(yassine): check m_identitifer is a known server.
-        m_identifier, payload = zmq_message
+        identifier, payload = zmq_message
 
-        if self._state == Raft._FOLLOWER:
-            self._handle_as_follower(m_identifier, payload)
-        elif self._state == Raft._LEADER:
-            self._handle_as_leader(m_identifier, payload)
-        elif self._state == Raft._CANDIDATE:
-            self._handle_as_candidate(m_identifier, payload)
-        else:
-            LOG.critical("unknown state")
+        message_type, params = message.decode_message(payload)
 
-    def _handle_as_leader(self, m_identifier, m_payload):
-        """Handle message as a leader.
-
-        :param m_identifier: The identifier of the remote peer in the form of
-        "address ip:port".
-        :type m_identifier: str
-        :param m_payload: The message payload.
-        :type m_payload: six.binary_type
-        """
-
-        m_type, params = message.decode_message(m_payload)
-
-        if m_type == message.APPEND_ENTRY_REQUEST:
-            self._process_append_entry_request(m_identifier, *params)
-        elif m_type == message.APPEND_ENTRY_RESPONSE:
-            self._process_append_entry_response(m_identifier, *params)
-        elif m_type == message.REQUEST_VOTE:
-            self._process_request_vote(m_identifier, *params)
+        if message_type == message.APPEND_ENTRY_REQUEST:
+            self._process_append_entry_request(identifier, *params)
+        elif message_type == message.APPEND_ENTRY_RESPONSE:
+            self._process_append_entry_response(identifier, *params)
+        elif message_type == message.REQUEST_VOTE:
+            self._process_request_vote(identifier, *params)
+        elif message_type == message.REQUEST_VOTE_RESPONSE:
+            self._process_request_vote_response(identifier, *params)
         else:
             # TODO(yassine): add dict to translate int to human readable type
-            LOG.debug("message type '%s' ignored" % m_type)
-
-    def _handle_as_follower(self, m_identifier, m_payload):
-        """Handle message as a follower.
-
-        :param m_identifier: The identifier of the remote peer in the form of
-        "address ip:port".
-        :type m_identifier: str
-        :param m_payload: The message payload.
-        :type m_payload: six.binary_type
-        """
-
-        m_type, params = message.decode_message(m_payload)
-
-        if m_type == message.APPEND_ENTRY_REQUEST:
-            self._process_append_entry_request(m_identifier, *params)
-        elif m_type == message.REQUEST_VOTE:
-            self._process_request_vote(m_identifier, *params)
-        else:
-            # TODO(yassine): add dict to translate int to human readable type
-            LOG.debug("message type '%s' ignored" % m_type)
-
-    def _handle_as_candidate(self, m_identifier, m_payload):
-        """Handle message as a candidate.
-
-        :param m_identifier: The identifier of the remote peer in the form of
-        "address ip:port".
-        :type m_identifier: str
-        :param m_payload: The message payload.
-        :type m_payload: six.binary_type
-        """
-
-        m_type, params = message.decode_message(m_payload)
-
-        if m_type == message.APPEND_ENTRY_REQUEST:
-            self._process_append_entry_request(m_identifier, *params)
-        elif m_type == message.REQUEST_VOTE:
-            self._process_request_vote(m_identifier, *params)
-        elif m_type == message.REQUEST_VOTE_RESPONSE:
-            self._process_request_vote_response(m_identifier, *params)
-        else:
-            # TODO(yassine): add dict to translate int to human readable type
-            LOG.debug("message type '%s' ignored" % m_type)
+            LOG.error("unknown message type '%s'" % message_type)
 
     def _process_append_entry_request(self, m_leader_id, remote_term,
                                       leader_prev_log_index,
@@ -447,6 +388,11 @@ class Raft(object):
         :type follower_last_log_index: int
         """
 
+        # If it is s not in leader state then it doesn't care about append
+        # entry responses.
+        if self._state != self._LEADER:
+            return
+
         # Received a stale request then respond negatively.
         if self._current_term > follower_term:
             LOG.debug("stale append entry from '%s'" % follower_id)
@@ -546,6 +492,11 @@ class Raft(object):
         :type vote_granted: bool
         """
 
+        # If it is not in candidate state then it doesn't care about append
+        # request vote responses.
+        if self._state != self._CANDIDATE:
+            return
+
         if self._current_term > remote_term:
             LOG.debug("request vote response from '%s' ignored, stale term" %
                       m_identifier)
@@ -640,6 +591,11 @@ class Raft(object):
         self._state = Raft._LEADER
         self._voters.clear()
         self._voted_for = None
+
+        for remote_peer in self._remote_peers:
+            self._next_index[remote_peer] = self._log.last_index() + 1
+            self._match_index[remote_peer] = 0
+
         if len(self._remote_endpoints):
             self._broadcast_ae_heartbeat()
             self._heartbeating.start()
