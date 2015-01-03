@@ -61,28 +61,29 @@ class ChillaxdClient(object):
             self._is_started = False
 
     def create_node(self, path, data):
-        create_node_cmd = commands.build_create_node(path, data)
+        _, create_node_cmd = commands.build_create_node(path, data)
         self._zmq_dealer.send(create_node_cmd)
+        return self._zmq_dealer.recv()
 
     def delete_node(self, path):
-        delete_node_cmd = commands.build_create_node(path)
+        _, delete_node_cmd = commands.build_delete_node(path)
         self._zmq_dealer.send(delete_node_cmd)
+        return self._zmq_dealer.recv()
 
     def get_children(self, path):
-        get_children_cmd = commands.build_get_children_request(path)
+        _, get_children_cmd = commands.build_get_children(path)
         self._zmq_dealer.send(get_children_cmd)
-        return self._zmq_dealer.recv_multipart()[0]
+        return self._zmq_dealer.recv()
 
     def get_data(self, path):
-        get_data_cmd = commands.build_get_data(path)
+        _, get_data_cmd = commands.build_get_data(path)
         self._zmq_dealer.send(get_data_cmd)
-        decoded_response = commands.decode_command(
-            self._zmq_dealer.recv_multipart()[0])
-        return decoded_response[1]
+        return self._zmq_dealer.recv()
 
     def set_data(self, path, data):
-        set_data_cmd = commands.build_set_data(path, data)
+        _, set_data_cmd = commands.build_set_data(path, data)
         self._zmq_dealer.send(set_data_cmd)
+        return self._zmq_dealer.recv()
 
 
 def _setup_logging():
@@ -112,19 +113,32 @@ def main():
     chillaxd_client.start()
 
     if sys.argv[2] == "create_node":
-        chillaxd_client.create_node(sys.argv[3], sys.argv[4])
+        command_response = chillaxd_client.create_node(sys.argv[3],
+                                                       sys.argv[4])
+        _, response_id, _ = commands.decode_command(
+            command_response)
+        print("ACK command '%s' " % response_id)
     if sys.argv[2] == "delete_node":
-        chillaxd_client.delete_node(sys.argv[3])
+        command_response = chillaxd_client.delete_node(sys.argv[3])
+        _, response_id, _ = commands.decode_command(
+            command_response)
+        print("ACK command '%s' " % response_id)
     elif sys.argv[2] == "get_data":
-        print chillaxd_client.get_data(sys.argv[3])
+        command_response = chillaxd_client.get_data(sys.argv[3])
+        _, _, data = commands.decode_command(command_response)
+        print(data[0])
     elif sys.argv[2] == "set_data":
-        chillaxd_client.set_data(sys.argv[3], sys.argv[4])
+        command_response = chillaxd_client.set_data(sys.argv[3], sys.argv[4])
+        _, response_id, _ = commands.decode_command(
+            command_response)
+        print("ACK command '%s' " % response_id)
     elif sys.argv[2] == "get_children":
         command_response = chillaxd_client.get_children(sys.argv[3])
-        children = commands.decode_command(command_response)
-        l_children = list(children[1])
+        response_type, response_id, children = commands.decode_command(
+            command_response)
+        l_children = list(children[0])
         l_children.sort()
-        print l_children
+        print(l_children)
 
     chillaxd_client.stop()
 

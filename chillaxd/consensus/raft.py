@@ -18,6 +18,7 @@ from __future__ import absolute_import
 import logging
 import random
 import signal
+import sys
 
 import six
 import zmq
@@ -97,7 +98,7 @@ class Raft(object):
         # The current known leader.
         self._leader = None
 
-        # Set of peers that voting for this server in current term.
+        # Set of peers that voted for this server in current term.
         self._voters = set()
 
         # The candidate that received vote in current term.
@@ -128,6 +129,11 @@ class Raft(object):
         # For each remote peer, index of the highest log entry known to be
         # replicated on that peer (initialized to 0, increases monotonically)
         self._match_index = {}
+
+        # For each command identifier it associates the client id so that
+        # the server is able to send an acknowledgment when a command
+        # is committed.
+        self._queued_commands = {}
 
         # Zeromq context.
         self._context = None
@@ -223,6 +229,7 @@ class Raft(object):
             self._match_index.clear()
             LOG.info("chillaxd stopped")
 
+    # TODO(yassine): if not the leader then send leader hint to the client
     def _process_command_message(self, socket, event):
         """Processes a command from a client.
 
@@ -236,25 +243,30 @@ class Raft(object):
         :type event: int
         """
 
-        zmq_command = socket.recv_multipart()
-        m_identifier, m_command = zmq_command[0], zmq_command[1]
+        zmq_message = socket.recv_multipart()
+        client_identifier, command = zmq_message[0], zmq_message[1]
 
-        decoded_command = commands.decode_command(m_command)
+        command_type, command_id, payload = commands.decode_command(command)
 
         # If it is a read command then just send immediately the result.
-        if decoded_command[0] == commands.GET_DATA:
-            data = self._datatree.get_data(decoded_command[1])
-            get_data_response = commands.build_get_data_response(data)
-            socket.send_multipart((m_identifier, get_data_response))
-        elif decoded_command[0] == commands.GET_CHILDREN:
-            children = list(self._datatree.get_children(decoded_command[1]))
-            get_children_response = commands.build_get_children_response(
-                children)
-            socket.send_multipart((m_identifier, get_children_response))
+        if commands.is_read_command(command_type):
+            if command_type == commands.GET_DATA:
+                data = self._datatree.get_data(*payload)
+                data_response = commands.build_get_data_response(command_id,
+                                                                 data)
+                socket.send_multipart((client_identifier, data_response))
+            elif command_type == commands.GET_CHILDREN:
+                children = list(self._datatree.get_children(*payload))
+                children_response = commands.build_get_children_response(
+                    command_id, children)
+                socket.send_multipart((client_identifier, children_response))
         else:
-            # If it is a write command then append it to the log, it will be
-            # piggybacked with the next heartbeat.
-            self._log.append_entry(self._current_term, m_command)
+            # If it is a write command then:
+            #     1. add the command to the commands queue
+            #     2. append it to the log, it will be piggybacked
+            #        with the next heartbeat
+            self._queued_commands[command_id] = client_identifier
+            self._log.append_entry(self._current_term, command)
 
     def _dispatch_internal_raft_message(self, socket, event):
         """Decode the received message and dispatch it on the corresponding
@@ -360,7 +372,7 @@ class Raft(object):
                     self._commit_index = min(leader_commit_index,
                                              self._log.last_index())
 
-                # Check if leader_entries  are committed and apply them to
+                # Check if leader entries  are committed and apply them to
                 # the state machine if they are not applied yet.
                 self._apply_committed_log_entries_to_state_machine()
             else:
@@ -372,9 +384,36 @@ class Raft(object):
                     self._current_term, False, None)
                 self._remote_peers[m_leader_id].send_message(ae_response_ko)
 
+    def _send_write_responses(self, first_non_ack_command_index):
+        for index in six.moves.range(first_non_ack_command_index,
+                                     self._commit_index + 1):
+            command = self._log.entry_at_index(index, decode=True)[2]
+            command_type, command_id, payload = commands.decode_command(
+                command)
+
+            client_id = self._queued_commands.get(command_id)
+            if client_id:
+                response = None
+                if command_type == commands.CREATE_NODE:
+                    response = commands.build_create_node_response(command_id,
+                                                                   True)
+                elif command_type == commands.DELETE_NODE:
+                    response = commands.build_delete_node_response(command_id,
+                                                                   True)
+                elif command_type == commands.SET_DATA:
+                    response = commands.build_set_data_response(command_id,
+                                                                True)
+                else:
+                    LOG.error("unknown client command type '%s'" %
+                              command_type)
+                if response:
+                    self._socket_for_commands.send_multipart((client_id,
+                                                              response))
+                    del self._queued_commands[command_id]
+
     def _process_append_entry_response(self, follower_id, follower_term,
                                        success, follower_last_log_index):
-        """Processes the append entries response.
+        """Processes the append entry response.
 
         :param follower_id: The identifier of the remote peer in the form of
         "address ip:port".
@@ -388,12 +427,12 @@ class Raft(object):
         :type follower_last_log_index: int
         """
 
-        # If it is s not in leader state then it doesn't care about append
+        # If it is not in leader state then it doesn't care about append
         # entry responses.
         if self._state != self._LEADER:
             return
 
-        # Received a stale request then respond negatively.
+        # Received a stale request then ignore it.
         if self._current_term > follower_term:
             LOG.debug("stale append entry from '%s'" % follower_id)
         # The current server is outdated then switch to follower.
@@ -410,7 +449,7 @@ class Raft(object):
                     follower_last_log_index + 1, self._log.last_index() + 1)
 
                 # Some magic here
-                all_match_index = self._match_index.values()
+                all_match_index = list(self._match_index.values())
                 all_match_index.append(self._log.last_index())
                 all_match_index.sort(reverse=True)
                 majority_index = int(len(all_match_index) / 2)
@@ -418,13 +457,15 @@ class Raft(object):
                 committed_term = self._log.entry_at_index(committed_index,
                                                           decode=True)[1]
                 if self._current_term == committed_term:
+                    first_non_ack_command_index = self._commit_index + 1
                     self._commit_index = max(committed_index,
                                              self._commit_index)
                     self._apply_committed_log_entries_to_state_machine()
+                    self._send_write_responses(first_non_ack_command_index)
             else:
                 # TODO(yassine): this is naive, make it faster.
-                # Decrements the next index for that follower and send an
-                # append entry request as described in RAFT.
+                # In case the induction checking failed on the follower then
+                # decrement its next index.
                 self._next_index[follower_id] = max(
                     1, self._next_index[follower_id] - 1)
 
@@ -516,35 +557,35 @@ class Raft(object):
 
         while self._commit_index > self._last_applied:
             self._last_applied += 1
-            log_entry = self._log.entry_at_index(self._last_applied)
-            decoded_entry = log.decode_log_entry(log_entry)
-            decoded_command = commands.decode_command(decoded_entry[2])
+            decoded_entry = self._log.entry_at_index(self._last_applied,
+                                                     decode=True)
+            m_type, command_id, payload = commands.decode_command(
+                decoded_entry[2])
 
-            if decoded_command[0] == commands.CREATE_NODE:
-                self._datatree.create_node(decoded_command[1],
-                                           decoded_command[2])
-            elif decoded_command[0] == commands.DELETE_NODE:
-                self._datatree.delete_node(decoded_command[1])
-            elif decoded_command[0] == commands.SET_DATA:
-                self._datatree.set_data(decoded_command[1], decoded_command[2])
-            elif decoded_command[0] == commands.NO_OPERATION:
+            if m_type == commands.CREATE_NODE:
+                self._datatree.create_node(*payload)
+            elif m_type == commands.DELETE_NODE:
+                self._datatree.delete_node(*payload)
+            elif m_type == commands.SET_DATA:
+                self._datatree.set_data(*payload)
+            elif m_type == commands.NO_OPERATION:
                 LOG.debug("noop command applied to the state machine.")
             else:
-                LOG.error("unknown state machine command '%s'"
-                          % decoded_entry[0])
-            LOG.info("commit_index='%s', last_applied='%s'" % (
-                self._commit_index, self._last_applied))
+                LOG.error("unknown state machine command '%s'" % m_type)
+            LOG.info("commit_index='%s', last_applied='%s'" %
+                     (self._commit_index, self._last_applied))
 
     def _broadcast_ae_heartbeat(self):
         """Broadcast append entries to all peers.
 
-        This method is periodically called by zmq timer within a period
+        This method is periodically called by zeromq timer within a period
         equals to '_leader_heartbeat_interval' ms.
         """
 
         if self._state != Raft._LEADER:
             raise InvalidState(
                 "Invalid state '%d' while sending heartbeat.")
+            sys.exit(1)
         LOG.info("send append entry heartbeat, term='%d'" % self._current_term)
 
         # Broadcast an append entry request.
@@ -569,6 +610,7 @@ class Raft(object):
         if self._state == Raft._LEADER:
             raise InvalidState(
                 "Invalid state '%d' while checking election timeout.")
+            sys.exit(1)
 
         if not self._leader:
             if not len(self._remote_endpoints):
@@ -588,6 +630,7 @@ class Raft(object):
             raise InvalidState(
                 "Invalid state '%s' while transiting to leader state." %
                 self._state)
+            sys.exit(1)
         self._state = Raft._LEADER
         self._voters.clear()
         self._voted_for = None
@@ -600,7 +643,7 @@ class Raft(object):
             self._broadcast_ae_heartbeat()
             self._heartbeating.start()
         self._checking_leader_timeout.stop()
-        no_op_message = commands. build_no_operation()
+        _, no_op_message = commands.build_no_operation()
         self._log.append_entry(self._current_term, no_op_message)
         LOG.info("switched to leader, term='%d'" % self._current_term)
 
@@ -638,6 +681,7 @@ class Raft(object):
             raise InvalidState(
                 "Invalid state '%s' while transiting to candidate state." %
                 self._state)
+            sys.exit(1)
         self._current_term += 1
         self._state = Raft._CANDIDATE
         LOG.debug("switched to candidate, term='%d'" % self._current_term)

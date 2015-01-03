@@ -13,6 +13,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import uuid
+
 import msgpack
 
 # The different commands that can be applied on the state machine and their
@@ -29,46 +31,75 @@ SET_DATA = 60
 SET_DATA_RESPONSE = 61
 NO_OPERATION = 70
 
+_READ_COMMANDS = [GET_CHILDREN, GET_DATA, NO_OPERATION]
+
 
 def build_create_node(path, data):
-    create_node = (CREATE_NODE, path, data)
-    return msgpack.packb(create_node)
+    command_id = str(uuid.uuid4())
+    create_node = (CREATE_NODE, command_id, path.encode("utf8"),
+                   data.encode("utf8"))
+    return command_id, msgpack.packb(create_node)
+
+
+def build_create_node_response(command_id, success):
+    create_node_response = (CREATE_NODE, command_id, success)
+    return msgpack.packb(create_node_response)
 
 
 def build_delete_node(path):
-    delete_node = (DELETE_NODE, path)
-    return msgpack.packb(delete_node)
+    command_id = str(uuid.uuid4())
+    delete_node = (DELETE_NODE, command_id, path.encode("utf8"))
+    return command_id, msgpack.packb(delete_node)
 
 
-def build_get_children_request(path):
-    get_children_request = (GET_CHILDREN, path)
-    return msgpack.packb(get_children_request)
+def build_delete_node_response(command_id, success):
+    delete_node_response = (DELETE_NODE, command_id, success)
+    return msgpack.packb(delete_node_response)
 
 
-def build_get_children_response(children):
-    get_children_response = (GET_CHILDREN_RESPONSE, children)
+def build_get_children(path):
+    command_id = str(uuid.uuid4())
+    get_children_request = (GET_CHILDREN, command_id, path.encode("utf8"))
+    return command_id, msgpack.packb(get_children_request)
+
+
+def build_get_children_response(command_id, children):
+    get_children_response = (GET_CHILDREN_RESPONSE, command_id, children)
     return msgpack.packb(get_children_response)
 
 
 def build_get_data(path):
-    get_data_request = (GET_DATA, path)
-    return msgpack.packb(get_data_request)
+    command_id = str(uuid.uuid4())
+    get_data_request = (GET_DATA, command_id, path.encode("utf8"))
+    return command_id, msgpack.packb(get_data_request)
 
 
-def build_get_data_response(data):
-    get_data_response = (GET_DATA_RESPONSE, data)
+def build_get_data_response(command_id, data):
+    get_data_response = (GET_DATA_RESPONSE, command_id, data.encode("utf8"))
     return msgpack.packb(get_data_response)
 
 
 def build_set_data(path, data):
-    set_data = (SET_DATA, path, data)
-    return msgpack.packb(set_data)
+    command_id = str(uuid.uuid4())
+    set_data = (SET_DATA, command_id, path.encode("utf8"), data.encode("utf8"))
+    return command_id, msgpack.packb(set_data)
+
+
+def build_set_data_response(command_id, success):
+    set_data_response = (SET_DATA, command_id, success)
+    return msgpack.packb(set_data_response)
 
 
 def build_no_operation():
-    no_operation = (NO_OPERATION, )
-    return msgpack.packb(no_operation)
+    command_id = str(uuid.uuid4())
+    no_operation = (NO_OPERATION, command_id)
+    return command_id, msgpack.packb(no_operation)
+
+
+def is_read_command(command_type):
+    return command_type in _READ_COMMANDS
 
 
 def decode_command(command):
-    return msgpack.unpackb(command, use_list=False)
+    decoded_command = msgpack.unpackb(command, use_list=False)
+    return decoded_command[0], decoded_command[1], decoded_command[2:]

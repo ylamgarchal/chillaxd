@@ -33,7 +33,7 @@ class DataTree(object):
         super(DataTree, self).__init__()
         self._nodes = {}
         # DataNode root of the tree
-        self._root = datanode.DataNode(data=six.binary_type())
+        self._root = datanode.DataNode(data=six.u(""))
         # Aliases for the root node in the tree
         self._nodes.setdefault("", self._root)
         self._nodes.setdefault(_CHILLAXD_ROOT, self._root)
@@ -48,6 +48,8 @@ class DataTree(object):
         :return:
         """
 
+        path = path.decode("utf8")
+        data = data.decode("utf8")
         parent_path, child_name = self._get_parent_path_and_child_name(path)
         parent = self._nodes.get(parent_path)
 
@@ -70,6 +72,7 @@ class DataTree(object):
         :return:
         """
 
+        path = path.decode("utf8")
         parent_path, child_name = self._get_parent_path_and_child_name(path)
         node = self._nodes.get(path)
         if not node:
@@ -93,6 +96,8 @@ class DataTree(object):
         :return:
         """
 
+        path = path.decode("utf8")
+        data = data.decode("utf8")
         node = self._nodes.get(path)
         if not node:
             raise NoNodeException()
@@ -108,6 +113,7 @@ class DataTree(object):
         :type: six.binary_type
         """
 
+        path = path.decode("utf8")
         node = self._nodes.get(path)
         if not node:
             raise NoNodeException()
@@ -123,6 +129,7 @@ class DataTree(object):
         :type: set
         """
 
+        path = path.decode("utf8")
         node = self._nodes.get(path)
         if not node:
             raise NoNodeException()

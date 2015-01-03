@@ -14,6 +14,7 @@
 # under the License.
 
 import msgpack
+import six
 
 
 class RaftLog(object):
@@ -55,7 +56,7 @@ class RaftLog(object):
 
     def entries_from_index(self, start_index):
         ret = []
-        for index in xrange(start_index, self._last_index + 1):
+        for index in six.moves.range(start_index, self._last_index + 1):
             ret.append(self._log[index])
         return ret
 

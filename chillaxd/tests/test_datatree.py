@@ -13,7 +13,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 import pytest
-import six
 
 from chillaxd import datatree
 
@@ -24,85 +23,99 @@ class TestDataTree(object):
         self.test_dt = datatree.DataTree()
 
     def test_create_node(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
-        assert set("a") == self.test_dt.get_children("/")
-        assert six.binary_type(b"test_data_a") == self.test_dt.get_data("/a")
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
+        assert set("a") == self.test_dt.get_children("/".encode("utf8"))
+        assert "test_data_a" == self.test_dt.get_data("/a".encode("utf8"))
 
-        self.test_dt.create_node("/a/b", six.binary_type(b"test_data_ab"))
-        assert set("a") == self.test_dt.get_children("/")
-        assert six.binary_type(b"test_data_a") == self.test_dt.get_data("/a")
-        assert set("b") == self.test_dt.get_children("/a")
-        assert (six.binary_type(b"test_data_ab") ==
-                self.test_dt.get_data("/a/b"))
-        self.test_dt.create_node("/a/c", six.binary_type(b"test_data_ac"))
-        assert set("bc") == self.test_dt.get_children("/a")
-        assert (six.binary_type(b"test_data_ac") ==
-                self.test_dt.get_data("/a/c"))
+        self.test_dt.create_node("/a/b".encode("utf8"),
+                                 "test_data_ab".encode("utf8"))
+        assert set("a") == self.test_dt.get_children("/".encode("utf8"))
+        assert "test_data_a" == self.test_dt.get_data("/a".encode("utf8"))
+        assert set("b") == self.test_dt.get_children("/a".encode("utf8"))
+        assert "test_data_ab" == self.test_dt.get_data("/a/b".encode("utf8"))
+        self.test_dt.create_node("/a/c".encode("utf8"),
+                                 "test_data_ac".encode("utf8"))
+        assert set("bc") == self.test_dt.get_children("/a".encode("utf8"))
+        assert "test_data_ac" == self.test_dt.get_data("/a/c".encode("utf8"))
 
     def test_create_node_with_no_parent(self):
         pytest.raises(datatree.NoNodeException, self.test_dt.create_node,
-                      "/a/b", six.binary_type(b"test_data_a"))
+                      "/a/b".encode("utf8"), "test_data_a".encode("utf8"))
 
     def test_create_node_with_existing_node(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
         pytest.raises(datatree.NodeExistsException,
-                      self.test_dt.create_node, "/a",
-                      six.binary_type(b"test_data_a"))
+                      self.test_dt.create_node, "/a".encode("utf8"),
+                      "test_data_a".encode("utf8"))
 
     def test_delete_node(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
-        self.test_dt.create_node("/a/b", six.binary_type(b"test_data_ab"))
-        self.test_dt.create_node("/a/c", six.binary_type(b"test_data_ac"))
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
+        self.test_dt.create_node("/a/b".encode("utf8"),
+                                 "test_data_ab".encode("utf8"))
+        self.test_dt.create_node("/a/c".encode("utf8"),
+                                 "test_data_ac".encode("utf8"))
 
-        assert set("bc") == self.test_dt.get_children("/a")
-        self.test_dt.delete_node("/a/c")
-        assert set("b") == self.test_dt.get_children("/a")
-        self.test_dt.delete_node("/a/b")
-        assert set() == self.test_dt.get_children("/a")
-        self.test_dt.delete_node("/a")
-        assert set() == self.test_dt.get_children("/")
+        assert set("bc") == self.test_dt.get_children("/a".encode("utf8"))
+        self.test_dt.delete_node("/a/c".encode("utf8"))
+        assert set("b") == self.test_dt.get_children("/a".encode("utf8"))
+        self.test_dt.delete_node("/a/b".encode("utf8"))
+        assert set() == self.test_dt.get_children("/a".encode("utf8"))
+        self.test_dt.delete_node("/a".encode("utf8"))
+        assert set() == self.test_dt.get_children("/".encode("utf8"))
 
     def test_delete_node_with_nonexistent_node(self):
-        pytest.raises(datatree.NoNodeException, self.test_dt.delete_node, "/a")
         pytest.raises(datatree.NoNodeException, self.test_dt.delete_node,
-                      "/a/b")
+                      "/a".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.delete_node,
-                      "/b/c")
+                      "/a/b".encode("utf8"))
+        pytest.raises(datatree.NoNodeException, self.test_dt.delete_node,
+                      "/b/c".encode("utf8"))
 
     def test_delete_node_with_children(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
-        self.test_dt.create_node("/a/b", six.binary_type(b"test_data_ab"))
-        self.test_dt.create_node("/a/c", six.binary_type(b"test_data_ac"))
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
+        self.test_dt.create_node("/a/b".encode("utf8"),
+                                 "test_data_ab".encode("utf8"))
+        self.test_dt.create_node("/a/c".encode("utf8"),
+                                 "test_data_ac".encode("utf8"))
 
         pytest.raises(datatree.NotEmptyException, self.test_dt.delete_node,
-                      "/a")
+                      "/a".encode("utf8"))
 
     def test_get_children(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
-        self.test_dt.create_node("/b", six.binary_type(b"test_data_b"))
-        assert set("ab") == self.test_dt.get_children("/")
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
+        self.test_dt.create_node("/b".encode("utf8"),
+                                 "test_data_b".encode("utf8"))
+        assert set("ab") == self.test_dt.get_children("/".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_children,
-                      "/c")
+                      "/c".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_children,
-                      "/a/c")
+                      "/a/c".encode("utf8"))
 
     def test_get_set_data(self):
-        self.test_dt.create_node("/a", six.binary_type(b"test_data_a"))
-        assert six.binary_type(b"test_data_a") == self.test_dt.get_data("/a")
-        self.test_dt.set_data("/a", six.binary_type(b"test_data_new_a"))
-        assert (six.binary_type(b"test_data_new_a") ==
-                self.test_dt.get_data("/a"))
+        self.test_dt.create_node("/a".encode("utf8"),
+                                 "test_data_a".encode("utf8"))
+        assert (str("test_data_a") ==
+                self.test_dt.get_data("/a".encode("utf8")))
+        self.test_dt.set_data("/a".encode("utf8"),
+                              "test_data_new_a".encode("utf8"))
+        assert (str("test_data_new_a") ==
+                self.test_dt.get_data("/a".encode("utf8")))
 
     def test_get_set_data_with_nonexistent_node(self):
         pytest.raises(datatree.NoNodeException, self.test_dt.set_data,
-                      "/a", six.binary_type(b"test_data_new_a"))
+                      "/a".encode("utf8"), "test_data_new_a".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_data,
-                      "/a")
+                      "/a".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.set_data,
-                      "/b", six.binary_type(b"test_data_new_a"))
+                      "/b".encode("utf8"), "test_data_new_a".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_data,
-                      "/b")
+                      "/b".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.set_data,
-                      "/a/b", six.binary_type(b"test_data_new_a"))
+                      "/a/b".encode("utf8"), "test_data_new_a".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_data,
-                      "/a/b")
+                      "/a/b".encode("utf8"))

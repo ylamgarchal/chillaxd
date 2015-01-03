@@ -13,8 +13,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import six
-
 
 class DataNode(object):
     """This class represents a node in the tree.
@@ -32,9 +30,6 @@ class DataNode(object):
         """
 
         super(DataNode, self).__init__()
-        if not isinstance(data, six.binary_type):
-            raise TypeError("data parameter must be of type '%s'"
-                            % six.binary_type)
 
         # the current data
         self._data = data
@@ -49,9 +44,6 @@ class DataNode(object):
         :return:
         """
 
-        if not isinstance(child, six.string_types):
-            raise TypeError("child parameter must be of type '%s'"
-                            % six.string_types)
         self._children.add(child)
 
     def remove_child(self, child):
@@ -62,9 +54,6 @@ class DataNode(object):
         :return:
         """
 
-        if not isinstance(child, six.string_types):
-            raise TypeError("child parameter must be of type '%s'"
-                            % six.string_types)
         self._children.remove(child)
 
     def get_children(self):
@@ -93,7 +82,4 @@ class DataNode(object):
         :return:
         """
 
-        if not isinstance(data, six.binary_type):
-            raise TypeError("data parameter must be of type '%s'"
-                            % six.binary_type)
         self._data = data
