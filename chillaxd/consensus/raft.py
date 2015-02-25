@@ -133,7 +133,7 @@ class Raft(object):
         # For each command identifier it associates the client id so that
         # the server is able to send an acknowledgment when a command
         # is committed.
-        self._queued_commands = {}
+        self._queued_client_commands = {}
 
         # Zeromq context.
         self._context = None
@@ -265,7 +265,7 @@ class Raft(object):
             #     1. add the command to the commands queue
             #     2. append it to the log, it will be piggybacked
             #        with the next heartbeat
-            self._queued_commands[command_id] = client_identifier
+            self._queued_client_commands[command_id] = client_identifier
             self._log.append_entry(self._current_term, command)
 
     def _dispatch_internal_raft_message(self, socket, event):
@@ -367,7 +367,7 @@ class Raft(object):
                     self._current_term, True, last_log_index)
                 self._remote_peers[m_leader_id].send_message(ae_response_ok)
 
-                # Update local commit_index according to RAFT.
+                # Update local commit_index.
                 if leader_commit_index > self._commit_index:
                     self._commit_index = min(leader_commit_index,
                                              self._log.last_index())
@@ -385,13 +385,22 @@ class Raft(object):
                 self._remote_peers[m_leader_id].send_message(ae_response_ko)
 
     def _send_write_responses(self, first_non_ack_command_index):
+        """Send acknowledgments for write requests.
+
+        Once the leader committed commands it sends the acknowledgments
+        to the corresponding client.
+
+        :param first_non_ack_command_index: the first command index which the
+        server didn't send an acknowledgment.
+        :type first_non_ack_command_index: int
+        """
         for index in six.moves.range(first_non_ack_command_index,
                                      self._commit_index + 1):
             command = self._log.entry_at_index(index, decode=True)[2]
             command_type, command_id, payload = commands.decode_command(
                 command)
 
-            client_id = self._queued_commands.get(command_id)
+            client_id = self._queued_client_commands.get(command_id)
             if client_id:
                 response = None
                 if command_type == commands.CREATE_NODE:
@@ -409,7 +418,7 @@ class Raft(object):
                 if response:
                     self._socket_for_commands.send_multipart((client_id,
                                                               response))
-                    del self._queued_commands[command_id]
+                    del self._queued_client_commands[command_id]
 
     def _process_append_entry_response(self, follower_id, follower_term,
                                        success, follower_last_log_index):
@@ -471,6 +480,17 @@ class Raft(object):
 
     def _is_candidate_log_up_to_date(self, candidate_log_index,
                                      candidate_log_term):
+        """Tells if the candidate's log is up to date compared to the local
+        logs.
+
+        :param candidate_log_index: Candidate's log index.
+        :type candidate_log_index: int
+        :param candidate_log_term: Candidate's log term.
+        :type candidate_log_term: int
+        :return: A boolean which indicate if the log is up to date.
+        :rtype: bool
+        """
+
         local_l_l_i, local_l_l_t = self._log.index_and_term_of_last_entry()
         if local_l_l_t < candidate_log_term:
             return True
@@ -673,8 +693,7 @@ class Raft(object):
         """Switch to candidate state.
 
         Increment the current term, vote for self, and broadcast a
-        request vote. The election timeout is randomly reinitialized
-        according to RAFT protocol.
+        request vote. The election timeout is randomly reinitialized.
         """
 
         if self._state == Raft._LEADER:

@@ -61,24 +61,25 @@ For instance if the current leader is the one listening on port 27001.
 **WARNING: for now, it's a minimalist client for demonstrating the replication mechanism.**
 
 ```sh
-$ chillaxdctl 127.0.0.1:27001 create_node /node_1  data_1
+$ chillax 127.0.0.1:27001 create_node /node_1  data_1
+ACK command 'c154482f-1ba7-4d0c-b8a4-b54d3807e2a2'
 ```
 
 We created a node on the root "/" named "node_1" associated to the data "data_1", we
 can then verify that this commands is replicated on each server.
 
 ```sh
-$ chillaxdctl 127.0.0.1:27001 get_children /
+$ chillax 127.0.0.1:27001 get_children /
 ['node_1']
 ```
 
 ```sh
-$ chillaxdctl 127.0.0.1:27002 get_children /
+$ chillax 127.0.0.1:27002 get_children /
 ['node_1']
 ```
 
 ```sh
-$ chillaxdctl 127.0.0.1:27003 get_children /
+$ chillax 127.0.0.1:27003 get_children /
 ['node_1']
 ```
 
