@@ -192,6 +192,13 @@ class Raft(object):
 
         self.stop()
 
+    def _is_standalone(self):
+
+        if not self._remote_endpoints:
+            return True
+        else:
+            return False
+
     def start(self):
         """Start the server."""
 
@@ -206,10 +213,14 @@ class Raft(object):
                                             self._private_endpoint)
             self._socket_for_commands.bind("tcp://%s" %
                                            self._public_endpoint)
-            for remote_server in six.itervalues(self._remote_peers):
-                remote_server.start()
+            if not self._is_standalone():
+                for remote_server in six.itervalues(self._remote_peers):
+                    remote_server.start()
+                self._checking_leader_timeout.start()
+            else:
+                self._switch_to_leader()
+
             self._is_started = True
-            self._checking_leader_timeout.start()
             self._zmq_ioloop.start()
 
     def stop(self):
@@ -267,6 +278,12 @@ class Raft(object):
             #        with the next heartbeat
             self._queued_client_commands[command_id] = client_identifier
             self._log.append_entry(self._current_term, command)
+            if self._is_standalone():
+                # If it's a standalone server then we can directly commit
+                # the command.
+                self._commit_index += 1
+                self._apply_committed_log_entries_to_state_machine()
+                self._send_write_responses(max(1, self._commit_index - 1))
 
     def _dispatch_internal_raft_message(self, socket, event):
         """Decode the received message and dispatch it on the corresponding
@@ -646,7 +663,7 @@ class Raft(object):
         stop to check if the leader is still alive.
         """
 
-        if self._state != Raft._CANDIDATE:
+        if not self._is_standalone() and self._state != Raft._CANDIDATE:
             raise InvalidState(
                 "Invalid state '%s' while transiting to leader state." %
                 self._state)
@@ -659,12 +676,15 @@ class Raft(object):
             self._next_index[remote_peer] = self._log.last_index() + 1
             self._match_index[remote_peer] = 0
 
-        if len(self._remote_endpoints):
+        if not self._is_standalone():
             self._broadcast_ae_heartbeat()
             self._heartbeating.start()
         self._checking_leader_timeout.stop()
-        _, no_op_message = commands.build_no_operation()
-        self._log.append_entry(self._current_term, no_op_message)
+
+        if not self._is_standalone():
+            _, no_op_message = commands.build_no_operation()
+            self._log.append_entry(self._current_term, no_op_message)
+
         LOG.info("switched to leader, term='%d'" % self._current_term)
 
     def _switch_to_follower(self, m_term, m_leader):

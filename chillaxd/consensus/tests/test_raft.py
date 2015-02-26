@@ -131,6 +131,12 @@ class TestServer(object):
         self.test_server._handle_signals(None, None)
         assert self.test_server._is_started is False
 
+    def test_is_standalone(self):
+
+        assert self.test_server._is_standalone() is False
+        self.test_server._remote_endpoints = {}
+        assert self.test_server._is_standalone() is True
+
     def test_dispatch_internal_raft_message(self):
 
         self.test_server._process_append_entry_request = mock.Mock()
@@ -406,12 +412,11 @@ class TestServer(object):
 
         pytest.raises(raft.InvalidState, self.test_server._switch_to_leader)
 
-        self.test_server._state = raft.Raft._CANDIDATE
-
         self.test_server._broadcast_ae_heartbeat = mock.Mock()
         self.test_server._heartbeating = mock.Mock()
         self.test_server._checking_leader_timeout = mock.Mock()
 
+        self.test_server._state = raft.Raft._CANDIDATE
         self.test_server._switch_to_leader()
 
         assert self.test_server._state == raft.Raft._LEADER
