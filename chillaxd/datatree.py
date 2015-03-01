@@ -14,9 +14,15 @@
 # under the License.
 
 from __future__ import absolute_import
+from . import commands
 from . import datanode
 
+import logging
+
 import six
+
+
+LOG = logging.getLogger(__name__)
 
 # the root of chillaxd tree
 _CHILLAXD_ROOT = "/"
@@ -37,6 +43,23 @@ class DataTree(object):
         # Aliases for the root node in the tree
         self._nodes.setdefault("", self._root)
         self._nodes.setdefault(_CHILLAXD_ROOT, self._root)
+
+    def apply_command(self, command_type, *args):
+        if command_type == commands.CREATE_NODE:
+            self.create_node(*args)
+        elif command_type == commands.DELETE_NODE:
+            self.delete_node(*args)
+        elif command_type == commands.GET_CHILDREN:
+            return self.get_children(*args)
+        elif command_type == commands.GET_DATA:
+            return self.get_data(*args)
+        elif command_type == commands.SET_DATA:
+            return self.set_data(*args)
+        elif command_type == commands.NO_OPERATION:
+            pass
+        else:
+            LOG.error("unknown state machine command '%s'" % command_type)
+            raise
 
     def create_node(self, path, data):
         """Add a new node to the tree.
@@ -125,8 +148,8 @@ class DataTree(object):
 
         :param path: the of path of the node
         :type path: six.string_types
-        :return: set of children's name
-        :type: set
+        :return: list of children's name
+        :type: list
         """
 
         path = path.decode("utf8")
@@ -134,7 +157,7 @@ class DataTree(object):
         if not node:
             raise NoNodeException()
         else:
-            return node.get_children()
+            return list(node.get_children())
 
     @staticmethod
     def _get_parent_path_and_child_name(path):
@@ -153,13 +176,25 @@ class DataTree(object):
         return parent_path, child_name
 
 
-class NoNodeException(Exception):
+class FsmException(Exception):
+    """FSM base exception."""
+
+
+class NoNodeException(FsmException):
+    errno = 1
     """Raised when a node is not found."""
 
 
-class NodeExistsException(Exception):
-    """Raised when a node already exists."""
+class NodeExistsException(FsmException):
+    errno = 2
+    """Raised when the creation of an already existing node is issued."""
 
 
-class NotEmptyException(Exception):
+class NotEmptyException(FsmException):
+    errno = 3
     """Raised when trying to delete a node with children."""
+
+
+class UnknownCommandException(FsmException):
+    errno = 4
+    """Raised when an unknown command is applied."""

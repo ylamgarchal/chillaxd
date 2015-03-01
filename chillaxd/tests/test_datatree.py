@@ -25,18 +25,20 @@ class TestDataTree(object):
     def test_create_node(self):
         self.test_dt.create_node("/a".encode("utf8"),
                                  "test_data_a".encode("utf8"))
-        assert set("a") == self.test_dt.get_children("/".encode("utf8"))
+        assert ["a"] == self.test_dt.get_children("/".encode("utf8"))
         assert "test_data_a" == self.test_dt.get_data("/a".encode("utf8"))
 
         self.test_dt.create_node("/a/b".encode("utf8"),
                                  "test_data_ab".encode("utf8"))
-        assert set("a") == self.test_dt.get_children("/".encode("utf8"))
+        assert ["a"] == self.test_dt.get_children("/".encode("utf8"))
         assert "test_data_a" == self.test_dt.get_data("/a".encode("utf8"))
-        assert set("b") == self.test_dt.get_children("/a".encode("utf8"))
+        assert ["b"] == self.test_dt.get_children("/a".encode("utf8"))
         assert "test_data_ab" == self.test_dt.get_data("/a/b".encode("utf8"))
         self.test_dt.create_node("/a/c".encode("utf8"),
                                  "test_data_ac".encode("utf8"))
-        assert set("bc") == self.test_dt.get_children("/a".encode("utf8"))
+        children = self.test_dt.get_children("/a".encode("utf8"))
+        children.sort()
+        assert ["b", "c"] == children
         assert "test_data_ac" == self.test_dt.get_data("/a/c".encode("utf8"))
 
     def test_create_node_with_no_parent(self):
@@ -58,13 +60,15 @@ class TestDataTree(object):
         self.test_dt.create_node("/a/c".encode("utf8"),
                                  "test_data_ac".encode("utf8"))
 
-        assert set("bc") == self.test_dt.get_children("/a".encode("utf8"))
+        children = self.test_dt.get_children("/a".encode("utf8"))
+        children.sort()
+        assert ["b", "c"] == children
         self.test_dt.delete_node("/a/c".encode("utf8"))
-        assert set("b") == self.test_dt.get_children("/a".encode("utf8"))
+        assert ["b"] == self.test_dt.get_children("/a".encode("utf8"))
         self.test_dt.delete_node("/a/b".encode("utf8"))
-        assert set() == self.test_dt.get_children("/a".encode("utf8"))
+        assert [] == self.test_dt.get_children("/a".encode("utf8"))
         self.test_dt.delete_node("/a".encode("utf8"))
-        assert set() == self.test_dt.get_children("/".encode("utf8"))
+        assert [] == self.test_dt.get_children("/".encode("utf8"))
 
     def test_delete_node_with_nonexistent_node(self):
         pytest.raises(datatree.NoNodeException, self.test_dt.delete_node,
@@ -90,7 +94,9 @@ class TestDataTree(object):
                                  "test_data_a".encode("utf8"))
         self.test_dt.create_node("/b".encode("utf8"),
                                  "test_data_b".encode("utf8"))
-        assert set("ab") == self.test_dt.get_children("/".encode("utf8"))
+        children = self.test_dt.get_children("/".encode("utf8"))
+        children.sort()
+        assert ["a", "b"] == children
         pytest.raises(datatree.NoNodeException, self.test_dt.get_children,
                       "/c".encode("utf8"))
         pytest.raises(datatree.NoNodeException, self.test_dt.get_children,

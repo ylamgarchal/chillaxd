@@ -41,20 +41,10 @@ def build_create_node(path, data):
     return command_id, msgpack.packb(create_node)
 
 
-def build_create_node_response(command_id, success):
-    create_node_response = (CREATE_NODE, command_id, success)
-    return msgpack.packb(create_node_response)
-
-
 def build_delete_node(path):
     command_id = str(uuid.uuid4())
     delete_node = (DELETE_NODE, command_id, path.encode("utf8"))
     return command_id, msgpack.packb(delete_node)
-
-
-def build_delete_node_response(command_id, success):
-    delete_node_response = (DELETE_NODE, command_id, success)
-    return msgpack.packb(delete_node_response)
 
 
 def build_get_children(path):
@@ -63,31 +53,16 @@ def build_get_children(path):
     return command_id, msgpack.packb(get_children_request)
 
 
-def build_get_children_response(command_id, children):
-    get_children_response = (GET_CHILDREN_RESPONSE, command_id, children)
-    return msgpack.packb(get_children_response)
-
-
 def build_get_data(path):
     command_id = str(uuid.uuid4())
     get_data_request = (GET_DATA, command_id, path.encode("utf8"))
     return command_id, msgpack.packb(get_data_request)
 
 
-def build_get_data_response(command_id, data):
-    get_data_response = (GET_DATA_RESPONSE, command_id, data.encode("utf8"))
-    return msgpack.packb(get_data_response)
-
-
 def build_set_data(path, data):
     command_id = str(uuid.uuid4())
     set_data = (SET_DATA, command_id, path.encode("utf8"), data.encode("utf8"))
     return command_id, msgpack.packb(set_data)
-
-
-def build_set_data_response(command_id, success):
-    set_data_response = (SET_DATA, command_id, success)
-    return msgpack.packb(set_data_response)
 
 
 def build_no_operation():
@@ -98,6 +73,11 @@ def build_no_operation():
 
 def is_read_command(command_type):
     return command_type in _READ_COMMANDS
+
+
+def build_response(command_type, command_id, status, *args):
+    response = (command_type, command_id, status) + args
+    return msgpack.packb(response)
 
 
 def decode_command(command):

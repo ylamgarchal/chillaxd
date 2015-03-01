@@ -14,6 +14,7 @@
 # under the License.
 
 import commands
+import datatree
 
 import logging
 import sys
@@ -115,30 +116,50 @@ def main():
     if sys.argv[2] == "create_node":
         command_response = chillaxd_client.create_node(sys.argv[3],
                                                        sys.argv[4])
-        _, response_id, _ = commands.decode_command(
-            command_response)
-        print("ACK command '%s' " % response_id)
+        _, response_id, response = commands.decode_command(command_response)
+
+        if response[0] == datatree.NodeExistsException.errno:
+            raise datatree.NodeExistsException()
+        elif response[0] == datatree.NoNodeException.errno:
+            raise datatree.NoNodeException()
+        else:
+            print("ACK command '%s' " % response_id)
     if sys.argv[2] == "delete_node":
         command_response = chillaxd_client.delete_node(sys.argv[3])
-        _, response_id, _ = commands.decode_command(
-            command_response)
-        print("ACK command '%s' " % response_id)
+        _, response_id, response = commands.decode_command(command_response)
+        if response[0] == datatree.NotEmptyException.errno:
+            raise datatree.NotEmptyException()
+        elif response[0] == datatree.NoNodeException.errno:
+            raise datatree.NoNodeException()
+        else:
+            print("ACK command '%s' " % response_id)
     elif sys.argv[2] == "get_data":
         command_response = chillaxd_client.get_data(sys.argv[3])
-        _, _, data = commands.decode_command(command_response)
-        print(data[0])
+        _, _, response = commands.decode_command(command_response)
+        if response[0] == datatree.NoNodeException.errno:
+            raise datatree.NoNodeException()
+        else:
+            print response[1]
     elif sys.argv[2] == "set_data":
         command_response = chillaxd_client.set_data(sys.argv[3], sys.argv[4])
-        _, response_id, _ = commands.decode_command(
-            command_response)
-        print("ACK command '%s' " % response_id)
+        _, response_id, response = commands.decode_command(command_response)
+        if response[0] == datatree.NodeExistsException.errno:
+            raise datatree.NodeExistsException()
+        elif response[0] == datatree.NoNodeException.errno:
+            raise datatree.NoNodeException()
+        else:
+            print("ACK command '%s' " % response_id)
     elif sys.argv[2] == "get_children":
         command_response = chillaxd_client.get_children(sys.argv[3])
-        response_type, response_id, children = commands.decode_command(
+        response_type, response_id, response = commands.decode_command(
             command_response)
-        l_children = list(children[0])
-        l_children.sort()
-        print(l_children)
+
+        if response[0] == datatree.NoNodeException.errno:
+            raise datatree.NoNodeException()
+        else:
+            l_children = list(response[1])
+            l_children.sort()
+            print(l_children)
 
     chillaxd_client.stop()
 

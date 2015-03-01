@@ -130,10 +130,10 @@ class Raft(object):
         # replicated on that peer (initialized to 0, increases monotonically)
         self._match_index = {}
 
-        # For each command identifier it associates the client id so that
-        # the server is able to send an acknowledgment when a command
-        # is committed.
-        self._queued_client_commands = {}
+        # For each command id it associates the tuple (client id, response)
+        # so that the server is able to send the response to the client. It
+        # allows the server to handle the commands asynchronously through RAFT.
+        self._queued_commands = {}
 
         # Zeromq context.
         self._context = None
@@ -261,22 +261,21 @@ class Raft(object):
 
         # If it is a read command then just send immediately the result.
         if commands.is_read_command(command_type):
-            if command_type == commands.GET_DATA:
-                data = self._datatree.get_data(*payload)
-                data_response = commands.build_get_data_response(command_id,
-                                                                 data)
-                socket.send_multipart((client_identifier, data_response))
-            elif command_type == commands.GET_CHILDREN:
-                children = list(self._datatree.get_children(*payload))
-                children_response = commands.build_get_children_response(
-                    command_id, children)
-                socket.send_multipart((client_identifier, children_response))
+            try:
+                data = self._datatree.apply_command(command_type, *payload)
+            except datatree.FsmException as e:
+                response = commands.build_response(command_type, command_id,
+                                                   e.errno)
+            else:
+                response = commands.build_response(command_type, command_id, 0,
+                                                   data)
+            socket.send_multipart((client_identifier, response))
         else:
             # If it is a write command then:
             #     1. add the command to the commands queue
             #     2. append it to the log, it will be piggybacked
             #        with the next heartbeat
-            self._queued_client_commands[command_id] = client_identifier
+            self._queued_commands[command_id] = (client_identifier, -1)
             self._log.append_entry(self._current_term, command)
             if self._is_standalone():
                 # If it's a standalone server then we can directly commit
@@ -417,25 +416,15 @@ class Raft(object):
             command_type, command_id, payload = commands.decode_command(
                 command)
 
-            client_id = self._queued_client_commands.get(command_id)
+            if command_type == commands.NO_OPERATION:
+                continue
+
+            client_id, status = self._queued_commands.get(command_id)
             if client_id:
-                response = None
-                if command_type == commands.CREATE_NODE:
-                    response = commands.build_create_node_response(command_id,
-                                                                   True)
-                elif command_type == commands.DELETE_NODE:
-                    response = commands.build_delete_node_response(command_id,
-                                                                   True)
-                elif command_type == commands.SET_DATA:
-                    response = commands.build_set_data_response(command_id,
-                                                                True)
-                else:
-                    LOG.error("unknown client command type '%s'" %
-                              command_type)
-                if response:
-                    self._socket_for_commands.send_multipart((client_id,
-                                                              response))
-                    del self._queued_client_commands[command_id]
+                response = commands.build_response(command_type, command_id,
+                                                   status)
+                self._socket_for_commands.send_multipart((client_id, response))
+                del self._queued_commands[command_id]
 
     def _process_append_entry_response(self, follower_id, follower_term,
                                        success, follower_last_log_index):
@@ -589,28 +578,31 @@ class Raft(object):
             else:
                 LOG.debug("request vote denied from '%s'" % m_identifier)
 
+    def _queue_command_if_leader(self, command_id, client_id, errno):
+        """Adds a command to the queue commands if in leader state."""
+        if self._state == Raft._LEADER:
+            self._queued_commands[command_id] = (client_id, errno)
+
     def _apply_committed_log_entries_to_state_machine(self):
         """Apply committed log entries to the state machine."""
 
-        while self._commit_index > self._last_applied:
-            self._last_applied += 1
-            decoded_entry = self._log.entry_at_index(self._last_applied,
-                                                     decode=True)
-            m_type, command_id, payload = commands.decode_command(
-                decoded_entry[2])
+        for index in six.moves.range(self._last_applied + 1,
+                                     self._commit_index + 1):
+            _, _, payload = self._log.entry_at_index(index, decode=True)
+            command_type, command_id, payload = commands.decode_command(
+                payload)
+            client_id = self._queued_commands.get(command_id, (-1, -1))[0]
 
-            if m_type == commands.CREATE_NODE:
-                self._datatree.create_node(*payload)
-            elif m_type == commands.DELETE_NODE:
-                self._datatree.delete_node(*payload)
-            elif m_type == commands.SET_DATA:
-                self._datatree.set_data(*payload)
-            elif m_type == commands.NO_OPERATION:
-                LOG.debug("noop command applied to the state machine.")
+            try:
+                self._datatree.apply_command(command_type, *payload)
+            except datatree.FsmException as e:
+                self._queue_command_if_leader(command_id, client_id, e.errno)
             else:
-                LOG.error("unknown state machine command '%s'" % m_type)
-            LOG.info("commit_index='%s', last_applied='%s'" %
-                     (self._commit_index, self._last_applied))
+                self._queue_command_if_leader(command_id, client_id, 0)
+
+        self._last_applied = self._commit_index
+        LOG.info("commit_index='%s', last_applied='%s'" %
+                 (self._commit_index, self._last_applied))
 
     def _broadcast_ae_heartbeat(self):
         """Broadcast append entries to all peers.
@@ -682,8 +674,9 @@ class Raft(object):
         self._checking_leader_timeout.stop()
 
         if not self._is_standalone():
-            _, no_op_message = commands.build_no_operation()
-            self._log.append_entry(self._current_term, no_op_message)
+            command_id, noop_message = commands.build_no_operation()
+            self._log.append_entry(self._current_term, noop_message)
+            self._queued_commands[command_id] = (-1, -1)
 
         LOG.info("switched to leader, term='%d'" % self._current_term)
 
