@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
+# Copyright Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -35,7 +35,8 @@ LOG = logging.getLogger(__name__)
 
 class Raft(object):
     """This class represents a server which implements the
-    RAFT consensus protocol."""
+    RAFT consensus protocol.
+    """
 
     # Raft states.
     _LEADER = "LEADER"
@@ -586,6 +587,10 @@ class Raft(object):
     def _apply_committed_log_entries_to_state_machine(self):
         """Apply committed log entries to the state machine."""
 
+        # if there is no new commands to apply then exit from the function
+        if self._last_applied == self._commit_index:
+            return
+
         for index in six.moves.range(self._last_applied + 1,
                                      self._commit_index + 1):
             _, _, payload = self._log.entry_at_index(index, decode=True)
@@ -734,4 +739,5 @@ class Raft(object):
 
 class InvalidState(Exception):
     """Exception raised when the server try to perform an action which
-    is not allowed in its current state."""
+    is not allowed in its current state.
+    """

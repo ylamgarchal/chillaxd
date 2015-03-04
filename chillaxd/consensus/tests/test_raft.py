@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
+# Copyright Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -18,10 +18,10 @@ import pytest
 import signal
 import six
 import zmq
-from chillaxd.consensus import peer
-from chillaxd.consensus import raft
 
 from chillaxd.consensus import message
+from chillaxd.consensus import peer
+from chillaxd.consensus import raft
 
 
 class TestServer(object):

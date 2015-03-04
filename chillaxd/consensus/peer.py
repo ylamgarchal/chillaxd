@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
+# Copyright Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -25,8 +25,7 @@ class Peer(object):
     """A remote peer which participate to RAFT protocol."""
 
     def __init__(self, context, local_identity, peer_identity):
-        """
-        :param context: An instance of zmq context.
+        """:param context: An instance of zmq context.
         :type context: zmq.Context
         :param local_identity: The local address of the current server in the
         form of "address ip:port". It's used as an identifier for the remote

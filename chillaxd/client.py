@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
+# Copyright Yassine Lamgarchal <lamgarchal.yassine@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -13,8 +13,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import commands
-import datatree
+from __future__ import absolute_import
+
+from . import commands
+from . import datatree
 
 import logging
 import sys
@@ -139,7 +141,7 @@ def main():
         if response[0] == datatree.NoNodeException.errno:
             raise datatree.NoNodeException()
         else:
-            print response[1]
+            print(response[1])
     elif sys.argv[2] == "set_data":
         command_response = chillaxd_client.set_data(sys.argv[3], sys.argv[4])
         _, response_id, response = commands.decode_command(command_response)
