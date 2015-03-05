@@ -27,12 +27,13 @@ Options:
   --version             Show version.
 """
 
+import ConfigParser
 import logging
+import os
 import sys
 
 import colorlog
 import docopt
-import yaml
 
 from chillaxd.consensus import raft
 
@@ -65,24 +66,29 @@ def _setup_logging():
 def _get_arguments(cli_arguments):
     arguments = {}
     config_file_path = cli_arguments["--config-file"]
+    config = ConfigParser.SafeConfigParser()
+
     if config_file_path:
-        try:
-            with open(config_file_path, "r") as config_file:
-                config = yaml.load(config_file)
-                arguments["private_endpoint"] = \
-                    config["bind_addresses"]["private"]
-                arguments["public_endpoint"] = \
-                    config["bind_addresses"]["public"]
-                arguments["remote_endpoints"] = config["remote_servers"]
-                arguments["leader_heartbeat_interval"] = \
-                    config["time_parameters"]["leader_heartbeat_interval"]
-                arguments["min_election_timeout"] = \
-                    config["time_parameters"]["min_election_timeout"]
-                arguments["max_election_timeout"] = \
-                    config["time_parameters"]["max_election_timeout"]
-        except (OSError, IOError) as e:
+
+        if not os.path.exists(config_file_path):
             LOG.error("cannot open configuration file '%s'" % config_file_path)
-            sys.exit(e.errno)
+            sys.exit(1)
+
+        config.read(config_file_path)
+        arguments["private_endpoint"] = config.get("bind_addresses", "private")
+        arguments["public_endpoint"] = config.get("bind_addresses", "public")
+        arguments["remote_endpoints"] = []
+        for server in config.options("remote_servers"):
+            endpoint = config.get("remote_servers", server)
+            arguments["remote_endpoints"].append(endpoint)
+
+        arguments["leader_heartbeat_interval"] = \
+            config.getint("time_parameters", "leader_heartbeat_interval")
+        arguments["min_election_timeout"] = \
+            config.getint("time_parameters", "min_election_timeout")
+        arguments["max_election_timeout"] = \
+            config.getint("time_parameters", "max_election_timeout")
+
     return arguments
 
 
