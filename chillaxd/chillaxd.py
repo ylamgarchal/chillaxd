@@ -35,7 +35,7 @@ import sys
 import colorlog
 import docopt
 
-from chillaxd.consensus import raft
+from consensus import raft
 
 LOG = logging.getLogger(__name__)
 

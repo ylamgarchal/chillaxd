@@ -137,7 +137,7 @@ class TestServer(object):
         self.test_server._remote_endpoints = {}
         assert self.test_server._is_standalone() is True
 
-    def test_dispatch_internal_raft_message(self):
+    def test_process_internal_raft_message(self):
 
         self.test_server._process_append_entry_request = mock.Mock()
         self.test_server._process_append_entry_response = mock.Mock()
@@ -149,8 +149,7 @@ class TestServer(object):
         aereq = (1, 2, 3, 4, ())
         aereq_packed = message.build_append_entry_request(*aereq)
         mock_socket.recv_multipart.return_value = ("identifier", aereq_packed)
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
+        self.test_server._process_internal_message(mock_socket, zmq.POLLIN)
         self.test_server._process_append_entry_request.assert_called_once_with(
             "identifier", *aereq)
 
@@ -158,8 +157,7 @@ class TestServer(object):
         aeresp = (1, True, 0)
         aeresp_packed = message.build_append_entry_response(*aeresp)
         mock_socket.recv_multipart.return_value = ("identifier", aeresp_packed)
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
+        self.test_server._process_internal_message(mock_socket, zmq.POLLIN)
         self.test_server._process_append_entry_response.\
             assert_called_once_with("identifier", *aeresp)
 
@@ -167,8 +165,7 @@ class TestServer(object):
         rv = (1, 2, 3)
         rv_packed = message.build_request_vote(*rv)
         mock_socket.recv_multipart.return_value = ("identifier", rv_packed)
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
+        self.test_server._process_internal_message(mock_socket, zmq.POLLIN)
         self.test_server._process_request_vote.assert_called_once_with(
             "identifier", *rv)
 
@@ -176,8 +173,7 @@ class TestServer(object):
         rvresp = (0, False)
         rvresp_packed = message.build_request_vote_response(*rvresp)
         mock_socket.recv_multipart.return_value = ("identifier", rvresp_packed)
-        self.test_server._dispatch_internal_raft_message(mock_socket,
-                                                         zmq.POLLIN)
+        self.test_server._process_internal_message(mock_socket, zmq.POLLIN)
         self.test_server._process_request_vote_response.\
             assert_called_once_with("identifier", *rvresp)
 
