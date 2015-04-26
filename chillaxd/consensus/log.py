@@ -61,13 +61,12 @@ class RaftLog(object):
         return ret
 
     def entry_at_index(self, index, decode=False):
-        try:
-            if decode:
-                return decode_log_entry(self._log[index])
-            else:
-                return self._log[index]
-        except KeyError:
-            return self._log[0]
+        if index not in self._log:
+            index = 0
+        if decode:
+            return decode_log_entry(self._log[index])
+        else:
+            return self._log[index]
 
     def last_index(self):
         return self._last_index
@@ -85,6 +84,13 @@ class RaftLog(object):
 
     def index_and_term_of_last_entry(self):
         return self._last_index, self._last_term
+
+    def first_index_of_term(self, term):
+        for log_entry in six.itervalues(self._log):
+            decoded_log_entry = decode_log_entry(log_entry)
+            if decoded_log_entry[1] == term:
+                return decoded_log_entry[0]
+        return 0
 
 
 def _build_log_entry(index, term, command):

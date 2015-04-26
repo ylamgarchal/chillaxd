@@ -24,7 +24,7 @@ def test_build_append_entry_request():
 
 
 def test_build_append_entry_response():
-    test_params = (0, True, 0)
+    test_params = (0, True, 0, None)
     aer_message = message.build_append_entry_response(*test_params)
     decoded_message = message.decode_message(aer_message)
     assert (message.APPEND_ENTRY_RESPONSE, test_params) == decoded_message

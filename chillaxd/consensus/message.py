@@ -29,9 +29,10 @@ def build_append_entry_request(term, prev_log_index, prev_log_term,
     return msgpack.packb(append_entry_request)
 
 
-def build_append_entry_response(term, success, last_log_index):
+def build_append_entry_response(term, success, last_log_index,
+                                first_conflicting_index):
     append_entry_response = (APPEND_ENTRY_RESPONSE, term, success,
-                             last_log_index)
+                             last_log_index, first_conflicting_index)
     return msgpack.packb(append_entry_response)
 
 

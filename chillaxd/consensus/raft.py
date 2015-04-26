@@ -341,13 +341,13 @@ class Raft(object):
         if self._current_term > remote_term:
             LOG.debug("stale append entry from '%s'" % m_leader_id)
             ae_response_ko = message.build_append_entry_response(
-                self._current_term, False, None)
+                self._current_term, False, None, None)
             self._remote_peers[m_leader_id].send_message(ae_response_ko)
         # The current server is outdated then switch to follower.
         elif self._current_term < remote_term:
             self._switch_to_follower(remote_term, m_leader_id)
             ae_response_ko = message.build_append_entry_response(
-                self._current_term, False, None)
+                self._current_term, False, None, None)
             self._remote_peers[m_leader_id].send_message(ae_response_ko)
         else:
             if self._state == Raft._LEADER:
@@ -380,7 +380,7 @@ class Raft(object):
                                                      leader_entries)
                 last_log_index = self._log.last_index()
                 ae_response_ok = message.build_append_entry_response(
-                    self._current_term, True, last_log_index)
+                    self._current_term, True, last_log_index, None)
                 self._remote_peers[m_leader_id].send_message(ae_response_ok)
 
                 # Update local commit_index.
@@ -396,8 +396,10 @@ class Raft(object):
                          "failed, local entry term='%s', leader previous "
                          "entry term='%s'" % (local_prev_entry_term,
                                               leader_prev_log_term))
+                first_conflicting_index = self._log.first_index_of_term(
+                    local_prev_entry_term)
                 ae_response_ko = message.build_append_entry_response(
-                    self._current_term, False, None)
+                    self._current_term, False, None, first_conflicting_index)
                 self._remote_peers[m_leader_id].send_message(ae_response_ko)
 
     def _send_write_responses(self, first_non_ack_command_index):
@@ -429,7 +431,8 @@ class Raft(object):
                 del self._queued_commands[command_id]
 
     def _process_append_entry_response(self, follower_id, follower_term,
-                                       success, follower_last_log_index):
+                                       success, follower_last_log_index,
+                                       first_conflicting_index):
         """Processes the append entry response.
 
         :param follower_id: The identifier of the remote peer in the form of
@@ -480,11 +483,8 @@ class Raft(object):
                     self._apply_committed_log_entries_to_state_machine()
                     self._send_write_responses(first_non_ack_command_index)
             else:
-                # TODO(yassine): this is naive, make it faster.
-                # In case the induction checking failed on the follower then
-                # decrement its next index.
                 self._next_index[follower_id] = max(
-                    1, self._next_index[follower_id] - 1)
+                    1, first_conflicting_index)
 
     def _is_candidate_log_up_to_date(self, candidate_log_index,
                                      candidate_log_term):

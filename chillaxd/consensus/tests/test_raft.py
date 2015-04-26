@@ -154,7 +154,7 @@ class TestServer(object):
             "identifier", *aereq)
 
         # Append entry response.
-        aeresp = (1, True, 0)
+        aeresp = (1, True, 0, None)
         aeresp_packed = message.build_append_entry_response(*aeresp)
         mock_socket.recv_multipart.return_value = ("identifier", aeresp_packed)
         self.test_server._process_internal_message(mock_socket, zmq.POLLIN)
@@ -188,7 +188,7 @@ class TestServer(object):
         self.test_server._process_append_entry_request("test_identifier",
                                                        *ae_req)
         ae_response = message.build_append_entry_response(
-            self.test_server._current_term, False, None)
+            self.test_server._current_term, False, None, None)
         self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
         test_peer.send_message.assert_called_once_with(ae_response)
@@ -205,7 +205,7 @@ class TestServer(object):
         self.test_server._remote_peers.__getitem__.assert_called_once_with(
             "test_identifier")
         ae_response = message.build_append_entry_response(
-            self.test_server._current_term, False, None)
+            self.test_server._current_term, False, None, None)
         test_peer.send_message.assert_called_once_with(ae_response)
         self.test_server._remote_peers.__getitem__.reset_mock()
         test_peer.reset_mock()
@@ -217,7 +217,7 @@ class TestServer(object):
                                                        *ae_req)
         assert self.test_server._leader == "test_identifier"
         ae_response = message.build_append_entry_response(
-            self.test_server._current_term, True, 0)
+            self.test_server._current_term, True, 0, None)
         test_peer.send_message.assert_called_once_with(ae_response)
         test_peer.reset_mock()
 
@@ -240,7 +240,7 @@ class TestServer(object):
         self.test_server._switch_to_follower.assert_called_once_with(
             0, "test_identifier")
         ae_response = message.build_append_entry_response(
-            self.test_server._current_term, True, 0)
+            self.test_server._current_term, True, 0, None)
         test_peer.send_message.assert_called_once_with(ae_response)
         test_peer.reset_mock()
 
@@ -251,7 +251,7 @@ class TestServer(object):
                                                        *ae_req)
         assert self.test_server._leader == "test_identifier"
         ae_response = message.build_append_entry_response(
-            self.test_server._current_term, False, None)
+            self.test_server._current_term, False, None, 0)
         test_peer.send_message.assert_called_once_with(ae_response)
 
     # TODO(yassine)

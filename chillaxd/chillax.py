@@ -411,12 +411,12 @@ def main():
             print(l_children)
     elif sys.argv[2] == "create_test":
         responses = []
-        for i in xrange(10000):
+        for i in xrange(15000):
             async_result = chillaxd_client.create_node("/test" + str(i),
                                                        "/test" + str(i))
             responses.append(async_result)
 
-        for i in xrange(10000):
+        for i in xrange(15000):
             _, response_id, response = responses[i].get()
 
             if response[0] == datatree.NodeExistsException.errno:
@@ -427,11 +427,11 @@ def main():
                 print("ACK command '%s'" % response_id)
     elif sys.argv[2] == "get_test":
         responses = []
-        for i in xrange(10000):
+        for i in xrange(15000):
             async_result = chillaxd_client.get_data("/test" + str(i))
             responses.append(async_result)
 
-        for i in xrange(10000):
+        for i in xrange(15000):
             _, response_id, response = responses[i].get()
 
             if response[0] == datatree.NoNodeException.errno:
