@@ -24,13 +24,18 @@ Install dependencies
 
  $ sudo apt-get install python-pip python-dev python3.4-dev -y
 
+Install Chillaxd from Pypi
+--------------------------
+
+ $ pip install chillaxd
+
 Install Chillaxd from source
 ----------------------------
 
  $ git clone https://github.com/ylamgarchal/chillaxd.git
- 
+
  $ cd chillaxd
- 
+
  $ sudo python setup.py install
 
 
@@ -49,17 +54,20 @@ First, open four consoles, the three first console will print the servers logs
 while the fourth is used to run client commands.
 
 
- $ chillaxd --config-file=chillaxd_1.conf
+ $ chillaxd --config-file ./chillaxd_1.conf
+
  2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27001'...
 
 
 
- $ chillaxd --config-file=chillaxd_2.conf
+ $ chillaxd --config-file ./chillaxd_2.conf
+
  2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27002'...
 
 
 
- $ chillaxd --config-file=chillaxd_3.conf
+ $ chillaxd --config-file ./chillaxd_3.conf
+
  2014-12-28 18:44:19,252 :: INFO :: let's chillax on '127.0.0.1:27003'...
 
 
@@ -71,7 +79,9 @@ For instance if the current leader is the one listening on port 27001.
 **WARNING: for now, it's a minimalist client for demonstrating the replication mechanism.**
 
 
- $ chillax 127.0.0.1:27001 create_node /node_1  data_1
+ $ export CHILLAXD_SERVER=127.0.0.1:27001
+
+ $ chillax create_node /node_1  data_1
  
  ACK command 'c154482f-1ba7-4d0c-b8a4-b54d3807e2a2'
 
@@ -80,17 +90,20 @@ We created a node on the root "/" named "node_1" associated to the data "data_1"
 can then verify that this commands is replicated on each server.
 
 
+ $ export CHILLAXD_SERVER=127.0.0.1:27001
+
  $ chillax 127.0.0.1:27001 get_children /
  
  ['node_1']
+
+ $ export CHILLAXD_SERVER=127.0.0.1:27002
 
  $ chillax 127.0.0.1:27002 get_children /
  
  ['node_1']
 
+ $ export CHILLAXD_SERVER=127.0.0.1:27003
+
  $ chillax 127.0.0.1:27003 get_children /
  
  ['node_1']
-
-
-For using the other available commands, please see the module chillax.py

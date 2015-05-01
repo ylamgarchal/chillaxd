@@ -34,7 +34,7 @@ setuptools.setup(
                 "RAFT consensus algorithm.",
     long_description=open('README.rst').read(),
     install_requires=get_requirements(),
-    url="http://github.com/ylamgarchal/chillaxd",
+    url="https://github.com/ylamgarchal/chillaxd",
     classifiers=[
         "Environment :: Console",
         "Intended Audience :: Developers",
