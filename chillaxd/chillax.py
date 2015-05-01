@@ -19,7 +19,9 @@ from . import commands
 from . import datatree
 from . import log
 
+import argparse
 import logging
+import os
 import sys
 import threading
 import uuid
@@ -333,15 +335,57 @@ class ClientEventLoop(threading.Thread):
         self._zmq_ioloop.start()
 
 
+def _init_conf():
+    parser = argparse.ArgumentParser(description='Chillaxd client.')
+    command_subparser = parser.add_subparsers(help='commands',
+                                              dest='command')
+    # create node
+    create_node_parser = command_subparser.add_parser(
+        'create_node', help='create a node')
+    create_node_parser.add_argument('path', action='store',
+                                    help='the node path')
+    create_node_parser.add_argument('data', action='store',
+                                    help='the associated data')
+
+    # delete node
+    delete_node_parser = command_subparser.add_parser(
+        'delete_node', help='delete a node')
+    delete_node_parser.add_argument('path', action='store',
+                                    help='node path')
+
+    # set data node
+    set_data_node_parser = command_subparser.add_parser(
+        'set_data', help='set data node')
+    set_data_node_parser.add_argument('path', action='store',
+                                      help='the node path')
+    set_data_node_parser.add_argument('data', action='store',
+                                      help='the data to set')
+
+    # get data node
+    get_data_node_parser = command_subparser.add_parser(
+        'get_data', help='get data of a node')
+    get_data_node_parser.add_argument('path', action='store',
+                                      help='node path')
+
+    # get children
+    get_children_parser = command_subparser.add_parser(
+        'get_children', help='get children of a node')
+    get_children_parser.add_argument('path', action='store',
+                                     help='node path')
+    return parser.parse_args()
+
+
 def main():
 
+    conf = _init_conf()
     log.setup_logging()
 
-    chillaxd_client = Client(sys.argv[1])
+    chillaxd_client = Client(os.environ.get("CHILLAXD_SERVER",
+                                            "127.0.0.1:27001"))
     chillaxd_client.start()
 
-    if sys.argv[2] == "create_node":
-        async_result = chillaxd_client.create_node(sys.argv[3], sys.argv[4])
+    if conf.command == "create_node":
+        async_result = chillaxd_client.create_node(conf.path, conf.data)
         _, response_id, response = async_result.get()
 
         if response[0] == datatree.NodeExistsException.errno:
@@ -350,8 +394,8 @@ def main():
             raise datatree.NoNodeException()
         else:
             print("ACK command '%s'" % response_id)
-    elif sys.argv[2] == "delete_node":
-        async_result = chillaxd_client.delete_node(sys.argv[3])
+    elif conf.command == "delete_node":
+        async_result = chillaxd_client.delete_node(conf.path)
         _, response_id, response = async_result.get()
 
         if response[0] == datatree.NotEmptyException.errno:
@@ -360,16 +404,16 @@ def main():
             raise datatree.NoNodeException()
         else:
             print("ACK command '%s'" % response_id)
-    elif sys.argv[2] == "get_data":
-        async_result = chillaxd_client.get_data(sys.argv[3])
+    elif conf.command == "get_data":
+        async_result = chillaxd_client.get_data(conf.path)
         _, response_id, response = async_result.get()
 
         if response[0] == datatree.NoNodeException.errno:
             raise datatree.NoNodeException()
         else:
             print(response[1])
-    elif sys.argv[2] == "set_data":
-        async_result = chillaxd_client.set_data(sys.argv[3], sys.argv[4])
+    elif conf.command == "set_data":
+        async_result = chillaxd_client.set_data(conf.path, conf.data)
         _, response_id, response = async_result.get()
 
         if response[0] == datatree.NodeExistsException.errno:
@@ -378,8 +422,8 @@ def main():
             raise datatree.NoNodeException()
         else:
             print("ACK command '%s' " % response_id)
-    elif sys.argv[2] == "get_children":
-        async_result = chillaxd_client.get_children(sys.argv[3])
+    elif conf.command == "get_children":
+        async_result = chillaxd_client.get_children(conf.path)
         response_type, response_id, response = async_result.get()
 
         if response[0] == datatree.NoNodeException.errno:
@@ -388,7 +432,7 @@ def main():
             l_children = list(response[1])
             l_children.sort()
             print(l_children)
-    elif sys.argv[2] == "create_test":
+    elif sys.argv[1] == "create_test":
         responses = []
         for i in xrange(15000):
             async_result = chillaxd_client.create_node("/test" + str(i),
@@ -404,7 +448,7 @@ def main():
                 raise datatree.NoNodeException()
             else:
                 print("ACK command '%s'" % response_id)
-    elif sys.argv[2] == "get_test":
+    elif sys.argv[1] == "get_test":
         responses = []
         for i in xrange(15000):
             async_result = chillaxd_client.get_data("/test" + str(i))

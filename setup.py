@@ -27,7 +27,7 @@ def get_requirements():
 setuptools.setup(
     name='chillaxd',
     version=chillaxd.__VERSION__,
-    packages=["chillaxd"],
+    packages=setuptools.find_packages(),
     author="Yassine Lamgarchal",
     author_email="lamgarchal.yassine@gmail.com",
     description="Distributed coordination framework based on ZeroMQ and "
