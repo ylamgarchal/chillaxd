@@ -17,13 +17,13 @@ from __future__ import absolute_import
 
 from . import commands
 from . import datatree
+from . import log
 
 import logging
 import sys
 import threading
 import uuid
 
-import colorlog
 import six
 import zmq
 from zmq.eventloop import ioloop
@@ -175,27 +175,6 @@ class Client(object):
         async_result = self._create_async_result(cmd_id)
         self._zmq_pair.send(set_data_cmd)
         return async_result
-
-
-def _setup_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    formatter = colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s :: %(levelname)s :: %(message)s",
-        datefmt=None,
-        reset=True,
-        log_colors={
-            'DEBUG': 'cyan',
-            'INFO': 'green',
-            'WARNING': 'yellow',
-            'ERROR': 'red',
-            'CRITICAL': 'red'
-        }
-    )
-    stream_handler = logging.StreamHandler(stream=sys.stdout)
-    stream_handler.setLevel(logging.DEBUG)
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
 
 
 class ChillaxTimeoutException(Exception):
@@ -356,7 +335,7 @@ class ClientEventLoop(threading.Thread):
 
 def main():
 
-    _setup_logging()
+    log.setup_logging()
 
     chillaxd_client = Client(sys.argv[1])
     chillaxd_client.start()

@@ -13,59 +13,23 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""Chillaxd server.
+from __future__ import absolute_import
+import chillaxd
+from chillaxd.consensus import raft
+from . import log
 
-Usage:
-  chillaxd [--config-file=<path>]
-  chillaxd (-h | --help)
-  chillaxd --version
-
-Options:
-  --config-file=<path>  The configuration file path
-                        [default: /etc/chillaxd/chillaxd.conf].
-  -h --help             Show this screen.
-  --version             Show version.
-"""
-
+import argparse
 import ConfigParser
 import logging
 import os
 import sys
 
-import colorlog
-import docopt
-
-from consensus import raft
 
 LOG = logging.getLogger(__name__)
 
-_VERSION = '0.0.1'
 
-
-def _setup_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    formatter = colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s :: %(levelname)s :: %(message)s",
-        datefmt=None,
-        reset=True,
-        log_colors={
-            'DEBUG': 'cyan',
-            'INFO': 'green',
-            'WARNING': 'yellow',
-            'ERROR': 'red',
-            'CRITICAL': 'red'
-        }
-    )
-    stream_handler = logging.StreamHandler(stream=sys.stdout)
-    stream_handler.setLevel(logging.DEBUG)
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
-
-
-def _get_arguments(cli_arguments):
+def _get_arguments(config_file_path="/etc/chillaxd.conf"):
     arguments = {}
-    config_file_path = cli_arguments["--config-file"]
     config = ConfigParser.SafeConfigParser()
 
     if config_file_path:
@@ -92,15 +56,25 @@ def _get_arguments(cli_arguments):
     return arguments
 
 
-def main(args=None):
+def _init_conf():
+    parser = argparse.ArgumentParser(description='Chillaxd server.')
+    parser.add_argument("--config-file", action="store",
+                        help="the configuration file path")
+    parser.add_argument("--version", action="store_true",
+                        help="show version")
+    return parser.parse_args()
 
-    _setup_logging()
-    cli_arguments = docopt.docopt(__doc__,
-                                  argv=args or sys.argv[1:],
-                                  version="Chillaxd %s" % _VERSION)
-    arguments = _get_arguments(cli_arguments)
-    chillax_server = raft.Raft(**arguments)
-    chillax_server.start()
+
+def main():
+
+    log.setup_logging()
+    conf = _init_conf()
+    if conf.version:
+        print("%s" % chillaxd.__VERSION__)
+    elif conf.config_file:
+        arguments = _get_arguments(conf.config_file)
+        chillax_server = raft.Raft(**arguments)
+        chillax_server.start()
 
 
 if __name__ == '__main__':

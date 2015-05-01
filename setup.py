@@ -16,24 +16,24 @@
 
 import setuptools
 
-__version__ = "0.1a"
+import chillaxd
+
+
+def get_requirements():
+    with open("requirements.txt", "r") as f:
+        requirements = f.read()
+        return requirements.split("\n")
 
 setuptools.setup(
     name='chillaxd',
-    version=__version__,
-    packages=setuptools.find_packages(),
+    version=chillaxd.__VERSION__,
+    packages=["chillaxd"],
     author="Yassine Lamgarchal",
     author_email="lamgarchal.yassine@gmail.com",
     description="Distributed coordination framework based on ZeroMQ and "
                 "RAFT consensus algorithm.",
     long_description=open('README.rst').read(),
-    install_requires=[
-        "colorlog>=2.4.0, <3.0.0",
-        "docopt>=0.6.2, <1.0.0",
-        "msgpack-python>=0.4.2, <1.0.0",
-        "pyzmq>=14.3.1, <15.0.0",
-        "six>=1.7.0, <2.0.0"
-    ],
+    install_requires=get_requirements(),
     url="http://github.com/ylamgarchal/chillaxd",
     classifiers=[
         "Environment :: Console",
