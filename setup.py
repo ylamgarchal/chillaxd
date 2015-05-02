@@ -15,12 +15,15 @@
 # under the License.
 
 import setuptools
+import os
 
 import chillaxd
 
 
 def get_requirements():
-    with open("requirements.txt", "r") as f:
+    requirements_path = "%s/%s" % (os.path.dirname(os.path.abspath(__file__)),
+                                   "requirements.txt")
+    with open(requirements_path, "r") as f:
         requirements = f.read()
         return requirements.split("\n")
 
@@ -35,6 +38,8 @@ setuptools.setup(
     long_description=open('README.rst').read(),
     install_requires=get_requirements(),
     url="https://github.com/ylamgarchal/chillaxd",
+    licence="Apache v2.0",
+    include_package_data=True,
     classifiers=[
         "Environment :: Console",
         "Intended Audience :: Developers",
