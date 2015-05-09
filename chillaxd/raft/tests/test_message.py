@@ -13,7 +13,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from chillaxd.consensus import message
+from chillaxd.raft import message
 
 
 def test_build_append_entry_request():

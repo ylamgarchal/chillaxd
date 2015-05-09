@@ -17,7 +17,7 @@ import mock
 import six
 import zmq
 
-from chillaxd.consensus import peer
+from chillaxd.raft import peer
 
 
 class TestPeer(object):

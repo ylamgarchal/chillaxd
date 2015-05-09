@@ -15,7 +15,7 @@
 
 from __future__ import absolute_import
 import chillaxd
-from chillaxd.consensus import raft
+from chillaxd.raft import server
 from . import log
 
 import argparse
@@ -42,8 +42,8 @@ def _get_arguments(config_file_path="/etc/chillaxd.conf"):
         arguments["private_endpoint"] = config.get("bind_addresses", "private")
         arguments["public_endpoint"] = config.get("bind_addresses", "public")
         arguments["remote_endpoints"] = []
-        for server in config.options("remote_servers"):
-            endpoint = config.get("remote_servers", server)
+        for remote_server in config.options("remote_servers"):
+            endpoint = config.get("remote_servers", remote_server)
             arguments["remote_endpoints"].append(endpoint)
 
         arguments["leader_heartbeat_interval"] = \
@@ -73,7 +73,7 @@ def main():
         print("%s" % chillaxd.__VERSION__)
     elif conf.config_file:
         arguments = _get_arguments(conf.config_file)
-        chillax_server = raft.Raft(**arguments)
+        chillax_server = server.RaftServer(**arguments)
         chillax_server.start()
 
 

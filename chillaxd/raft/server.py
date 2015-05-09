@@ -18,7 +18,6 @@ from __future__ import absolute_import
 import logging
 import random
 import signal
-import sys
 
 import six
 import zmq
@@ -26,22 +25,18 @@ from zmq.eventloop import ioloop
 
 from . import peer
 from chillaxd import commands
-from chillaxd.consensus import log
-from chillaxd.consensus import message
+from chillaxd.raft import log
+from chillaxd.raft import message
+from chillaxd.raft import serverstate
 from chillaxd import datatree
 
 LOG = logging.getLogger(__name__)
 
 
-class Raft(object):
+class RaftServer(object):
     """This class represents a server which implements the
     RAFT consensus protocol.
     """
-
-    # Raft states.
-    _LEADER = "LEADER"
-    _CANDIDATE = "CANDIDATE"
-    _FOLLOWER = "FOLLOWER"
 
     def __init__(self, private_endpoint, public_endpoint,
                  remote_endpoints=None, leader_heartbeat_interval=50,
@@ -56,7 +51,7 @@ class Raft(object):
         :type public_endpoint: str
         :param remote_endpoints: A list of endpoints corresponding to
         the other peers.
-        :type remote_endpoints: list
+        :type remote_endpoints: tuple
         :param leader_heartbeat_interval: The period of time between two
         heartbeat from the leader.
         :type leader_heartbeat_interval: int
@@ -68,11 +63,11 @@ class Raft(object):
         timeout.
         :type max_election_timeout: int
         """
-        super(Raft, self).__init__()
+        super(RaftServer, self).__init__()
 
         self._private_endpoint = private_endpoint
         self._public_endpoint = public_endpoint
-        self._remote_endpoints = remote_endpoints or []
+        self._remote_endpoints = tuple(remote_endpoints) or ()
         self._leader_heartbeat_interval = leader_heartbeat_interval
         self._min_election_timeout = min_election_timeout
         self._max_election_timeout = max_election_timeout
@@ -82,64 +77,26 @@ class Raft(object):
         # A quorum is a majority that is necessary for moving forward.
         self._quorum = int(((len(self._remote_endpoints) + 1) / 2)) + 1
 
-        # A zmq timer that is activated when the server is not the leader
-        # of the cluster. It periodically checks if the leader is alive with
-        # a period randomly chosen between '_min_election_timeout' and
-        # '_max_election_timeout' ms.
-        self._checking_leader_timeout = None
-
-        # A zmq timer that is activated when the server is the leader
-        # of the cluster. It periodically send heartbeats to other peers within
-        # a period defined by '_leader_heartbeat_interval' ms.
-        self._heartbeating = None
-
-        # The server state, initially a follower.
-        self._state = Raft._FOLLOWER
-
-        # The current known leader.
-        self._leader = None
-
-        # Set of peers that voted for this server in current term.
-        self._voters = set()
-
-        # The candidate that received vote in current term.
-        self._voted_for = None
-
         # The replicated state machine is a tree.
-        self._datatree = datatree.DataTree()
+        self._state_machine = datatree.DataTree()
 
         # The log entries, each entry contains commands for the state machine.
         self._log = log.RaftLog()
-
-        # Latest term the server has seen
-        # (initialized to 0 on first boot, increases monotonically).
-        self._current_term = 0
-
-        # Index of highest log entry known to be committed
-        # (initialized to 0, increases monotonically)
-        self._commit_index = 0
-
-        # Index of highest log entry applied to state machine
-        # (initialized to 0, increases monotonically)
-        self._last_applied = 0
-
-        # For each remote peer, index of the next log entry to send
-        # (initialized to leader last log index + 1)
-        self._next_index = {}
-
-        # For each remote peer, index of the highest log entry known to be
-        # replicated on that peer (initialized to 0, increases monotonically)
-        self._match_index = {}
 
         # For each command id it associates the tuple (client id, response)
         # so that the server is able to send the response to the client. It
         # allows the server to handle the commands asynchronously through RAFT.
         self._queued_commands = {}
 
-        # Zeromq context.
+        # The state of the server.
+        self._server_state = serverstate.ServerState(self, self._log,
+                                                     self._queued_commands,
+                                                     self._private_endpoint)
+
+        # ZeroMQ context.
         self._zmq_context = None
 
-        # Zeromq IO loop.
+        # ZeroMQ IO loop.
         self._zmq_ioloop = None
 
         # This socket is used for internal RAFT messages, the server will bind
@@ -153,6 +110,17 @@ class Raft(object):
         # Indicate if the server is started.
         self._is_started = False
 
+        # A zmq timer that is activated when the server is the leader
+        # of the cluster. It periodically send heartbeats to other peers within
+        # a period defined by '_leader_heartbeat_interval' ms.
+        self.heartbeating = None
+
+        # A zmq timer that is activated when the server is not the leader
+        # of the cluster. It periodically checks if the leader is alive with
+        # a period randomly chosen between '_min_election_timeout' and
+        # '_max_election_timeout' ms.
+        self.checking_leader_timeout = None
+
     def _setup(self):
         """Setup all the attributes.
 
@@ -162,14 +130,15 @@ class Raft(object):
         self._zmq_context = zmq.Context()
         self._socket_for_commands = self._zmq_context.socket(zmq.ROUTER)
         self._socket_for_consensus = self._zmq_context.socket(zmq.ROUTER)
+
         for remote_endpoint in self._remote_endpoints:
             remote_peer = peer.Peer(self._zmq_context,
                                     self._private_endpoint,
                                     remote_endpoint)
-            binary_r_e = six.b(remote_endpoint)
-            self._remote_peers[binary_r_e] = remote_peer
-            self._next_index[binary_r_e] = self._log.last_index() + 1
-            self._match_index[binary_r_e] = 0
+
+            peer_id = six.b(remote_endpoint)
+            self._remote_peers[peer_id] = remote_peer
+            self._server_state.init_indexes(peer_id)
 
         self._zmq_ioloop = ioloop.ZMQIOLoop().instance()
         self._zmq_ioloop.add_handler(self._socket_for_commands,
@@ -178,13 +147,13 @@ class Raft(object):
         self._zmq_ioloop.add_handler(self._socket_for_consensus,
                                      self._process_internal_message,
                                      zmq.POLLIN)
-        self._checking_leader_timeout = ioloop.PeriodicCallback(
+        self.checking_leader_timeout = ioloop.PeriodicCallback(
             self._election_timeout_task,
             random.randint(self._min_election_timeout,
                            self._max_election_timeout),
             io_loop=self._zmq_ioloop)
-        self._heartbeating = ioloop.PeriodicCallback(
-            self._broadcast_ae_heartbeat,
+        self.heartbeating = ioloop.PeriodicCallback(
+            self.broadcast_append_entries,
             self._leader_heartbeat_interval,
             io_loop=self._zmq_ioloop)
 
@@ -193,12 +162,11 @@ class Raft(object):
 
         self.stop()
 
-    def _is_standalone(self):
+    def is_standalone(self):
+        return not self._remote_endpoints
 
-        if not self._remote_endpoints:
-            return True
-        else:
-            return False
+    def remote_peers(self):
+        return self._remote_peers.copy()
 
     def start(self):
         """Start the server."""
@@ -214,12 +182,12 @@ class Raft(object):
                                             self._private_endpoint)
             self._socket_for_commands.bind("tcp://%s" %
                                            self._public_endpoint)
-            if not self._is_standalone():
+            if not self.is_standalone():
                 for remote_server in six.itervalues(self._remote_peers):
                     remote_server.start()
-                self._checking_leader_timeout.start()
+                self.checking_leader_timeout.start()
             else:
-                self._switch_to_leader()
+                self._server_state.switch_to_leader()
 
             self._is_started = True
             self._zmq_ioloop.start()
@@ -228,8 +196,8 @@ class Raft(object):
         """Stop gracefully the server."""
 
         if self._is_started:
-            self._checking_leader_timeout.stop()
-            self._heartbeating.stop()
+            self.checking_leader_timeout.stop()
+            self.heartbeating.stop()
             self._socket_for_commands.close()
             self._socket_for_consensus.close()
             for remote_server in six.itervalues(self._remote_peers):
@@ -237,8 +205,7 @@ class Raft(object):
             self._zmq_ioloop.stop()
             self._zmq_context.destroy(linger=0)
             self._is_started = False
-            self._next_index.clear()
-            self._match_index.clear()
+            self._server_state.clear()
             LOG.info("chillaxd stopped")
 
     # TODO(yassine): if not the leader then send leader hint to the client
@@ -255,6 +222,7 @@ class Raft(object):
         :type event: int
         """
 
+        assert event == zmq.POLLIN
         zmq_message = socket.recv_multipart()
         client_identifier, command = zmq_message[0], zmq_message[1]
 
@@ -263,7 +231,8 @@ class Raft(object):
         # If it is a read command then just send immediately the result.
         if commands.is_read_command(command_type):
             try:
-                data = self._datatree.apply_command(command_type, *payload)
+                data = self._state_machine.apply_command(command_type,
+                                                         *payload)
             except datatree.FsmException as e:
                 response = commands.build_response(command_type, command_id,
                                                    e.errno)
@@ -275,15 +244,17 @@ class Raft(object):
             # If it is a write command then:
             #     1. add the command to the commands queue
             #     2. append it to the log, it will be piggybacked
-            #        with the next heartbeat
+            #        with the next heartbeat among the cluster
             self._queued_commands[command_id] = (client_identifier, -1)
-            self._log.append_entry(self._current_term, command)
-            if self._is_standalone():
+            self._log.append_entry(self._server_state.term(), command)
+            if self.is_standalone():
                 # If it's a standalone server then we can directly commit
                 # the command.
-                self._commit_index += 1
+                new_commit_index = self._server_state.commit_index() + 1
+                self._server_state.update_commit_index(new_commit_index)
                 self._apply_committed_log_entries_to_state_machine()
-                self._send_write_responses(max(1, self._commit_index - 1))
+                self._send_write_responses(
+                    max(1, self._server_state.commit_index() - 1))
 
     def _process_internal_message(self, socket, event):
         """Decode the received message and dispatch it on the corresponding
@@ -296,7 +267,6 @@ class Raft(object):
         """
 
         assert event == zmq.POLLIN
-
         # TODO(yassine): check m_identitifer is a known server.
         identifier, payload = socket.recv_multipart()
 
@@ -338,32 +308,32 @@ class Raft(object):
         """
 
         # Received a stale request then respond negatively.
-        if self._current_term > remote_term:
+        if self._server_state.term() > remote_term:
             LOG.debug("stale append entry from '%s'" % m_leader_id)
             ae_response_ko = message.build_append_entry_response(
-                self._current_term, False, None, None)
+                self._server_state.term(), False, None, None)
             self._remote_peers[m_leader_id].send_message(ae_response_ko)
         # The current server is outdated then switch to follower.
-        elif self._current_term < remote_term:
-            self._switch_to_follower(remote_term, m_leader_id)
+        elif self._server_state.term() < remote_term:
+            self._server_state.switch_to_follower(remote_term, m_leader_id)
             ae_response_ko = message.build_append_entry_response(
-                self._current_term, False, None, None)
+                self._server_state.term(), False, None, None)
             self._remote_peers[m_leader_id].send_message(ae_response_ko)
         else:
-            if self._state == Raft._LEADER:
+            if self._server_state.is_leader():
                 LOG.error("'%s' elected at same term '%d'" %
                           (m_leader_id, remote_term))
-                self._switch_to_follower(remote_term, None)
+                self._server_state.switch_to_follower(remote_term, None)
                 return
             LOG.debug("leader='%s', term='%d'" % (m_leader_id,
-                                                  self._current_term))
+                                                  self._server_state.term()))
             # If the peer is in candidate state and received an append entry
             # request in the same term, it means the remote peer has been
             # elected, then switch to follower state.
-            if self._state == Raft._CANDIDATE:
-                self._switch_to_follower(remote_term, m_leader_id)
+            if self._server_state.is_candidate():
+                self._server_state.switch_to_follower(remote_term, m_leader_id)
             # The leader is alive.
-            self._leader = m_leader_id
+            self._server_state.update_leader(m_leader_id)
 
             local_prev_log_index = self._log.entry_at_index(
                 leader_prev_log_index, decode=True)
@@ -380,13 +350,14 @@ class Raft(object):
                                                      leader_entries)
                 last_log_index = self._log.last_index()
                 ae_response_ok = message.build_append_entry_response(
-                    self._current_term, True, last_log_index, None)
+                    self._server_state.term(), True, last_log_index, None)
                 self._remote_peers[m_leader_id].send_message(ae_response_ok)
 
                 # Update local commit_index.
-                if leader_commit_index > self._commit_index:
-                    self._commit_index = min(leader_commit_index,
-                                             self._log.last_index())
+                if leader_commit_index > self._server_state.commit_index():
+                    new_commit_index = min(leader_commit_index,
+                                           self._log.last_index())
+                    self._server_state.update_commit_index(new_commit_index)
 
                 # Check if leader entries  are committed and apply them to
                 # the state machine if they are not applied yet.
@@ -399,7 +370,8 @@ class Raft(object):
                 first_conflicting_index = self._log.first_index_of_term(
                     local_prev_entry_term)
                 ae_response_ko = message.build_append_entry_response(
-                    self._current_term, False, None, first_conflicting_index)
+                    self._server_state.term(), False, None,
+                    first_conflicting_index)
                 self._remote_peers[m_leader_id].send_message(ae_response_ko)
 
     def _send_write_responses(self, first_non_ack_command_index):
@@ -413,7 +385,7 @@ class Raft(object):
         :type first_non_ack_command_index: int
         """
         for index in six.moves.range(first_non_ack_command_index,
-                                     self._commit_index + 1):
+                                     self._server_state.commit_index() + 1):
             command = self._log.entry_at_index(index, decode=True)[2]
             command_type, command_id, payload = commands.decode_command(
                 command)
@@ -449,42 +421,49 @@ class Raft(object):
 
         # If it is not in leader state then it doesn't care about append
         # entry responses.
-        if self._state != self._LEADER:
+        if not self._server_state.is_leader():
             return
 
         # Received a stale request then ignore it.
-        if self._current_term > follower_term:
+        if self._server_state.term() > follower_term:
             LOG.debug("stale append entry from '%s'" % follower_id)
         # The current server is outdated then switch to follower.
-        elif self._current_term < follower_term:
+        elif self._server_state.term() < follower_term:
             LOG.debug("process aer server outdated, will switch to follower")
-            self._switch_to_follower(follower_term, None)
+            self._server_state.switch_to_follower(follower_term, None)
         else:
             if success:
                 # If the append entry request succeed then we update the match
                 # index of that follower and see if some entries are committed.
-                self._match_index[follower_id] = max(
-                    self._match_index[follower_id], follower_last_log_index)
-                self._next_index[follower_id] = min(
-                    follower_last_log_index + 1, self._log.last_index() + 1)
+
+                self._server_state.update_match_index(follower_id,
+                                                      follower_last_log_index)
+
+                new_next_index = min(follower_last_log_index + 1,
+                                     self._log.last_index() + 1)
+                self._server_state.update_next_index(follower_id,
+                                                     new_next_index)
 
                 # Some magic here
-                all_match_index = list(self._match_index.values())
+                all_match_index = list(self._server_state.match_index_values())
                 all_match_index.append(self._log.last_index())
                 all_match_index.sort(reverse=True)
                 majority_index = int(len(all_match_index) / 2)
                 committed_index = all_match_index[majority_index]
                 committed_term = self._log.entry_at_index(committed_index,
                                                           decode=True)[1]
-                if self._current_term == committed_term:
-                    first_non_ack_command_index = self._commit_index + 1
-                    self._commit_index = max(committed_index,
-                                             self._commit_index)
+                if self._server_state.term() == committed_term:
+                    first_non_ack_command_index = \
+                        self._server_state.commit_index() + 1
+                    new_commit_index = max(committed_index,
+                                           self._server_state.commit_index())
+                    self._server_state.update_commit_index(new_commit_index)
                     self._apply_committed_log_entries_to_state_machine()
                     self._send_write_responses(first_non_ack_command_index)
             else:
-                self._next_index[follower_id] = max(
-                    1, first_conflicting_index)
+                new_next_index = max(1, first_conflicting_index)
+                self._server_state.update_next_index(follower_id,
+                                                     new_next_index)
 
     def _is_candidate_log_up_to_date(self, candidate_log_index,
                                      candidate_log_term):
@@ -523,28 +502,27 @@ class Raft(object):
         """
 
         # Received a stale request then respond negatively.
-        if self._current_term > candidate_term:
+        if self._server_state.term() > candidate_term:
             LOG.debug("request vote denied to '%s', stale term" % candidate_id)
             rv_response_ko = message.build_request_vote_response(
-                self._current_term, False)
+                self._server_state.term(), False)
             self._remote_peers[candidate_id].send_message(rv_response_ko)
             return
 
         # The current server is outdated then switch to follower.
-        if self._current_term < candidate_term:
+        if self._server_state.term() < candidate_term:
             LOG.debug("process rv server outdated, switch to follower")
-            self._switch_to_follower(candidate_term, None)
+            self._server_state.switch_to_follower(candidate_term, None)
 
         vote = False
         if self._is_candidate_log_up_to_date(last_log_index, last_log_term):
-            if not self._voted_for or self._voted_for == candidate_id:
+            if self._server_state.grant_vote(candidate_id):
                 vote = True
-                self._voted_for = candidate_id
 
         LOG.debug("send request vote response '%s' to '%s" % (vote,
                                                               candidate_id))
         rv_response = message.build_request_vote_response(
-            self._current_term, vote)
+            self._server_state.term(), vote)
         self._remote_peers[candidate_id].send_message(rv_response)
 
     def _process_request_vote_response(self, m_identifier,
@@ -563,37 +541,37 @@ class Raft(object):
 
         # If it is not in candidate state then it doesn't care about append
         # request vote responses.
-        if self._state != self._CANDIDATE:
+        if not self._server_state.is_candidate():
             return
 
-        if self._current_term > remote_term:
+        if self._server_state.term() > remote_term:
             LOG.debug("request vote response from '%s' ignored, stale term" %
                       m_identifier)
-        elif self._current_term < remote_term:
+        elif self._server_state.term() < remote_term:
             LOG.debug("request vote denied from '%s'" % m_identifier)
-            self._switch_to_follower(remote_term, None)
+            self._server_state.switch_to_follower(remote_term, None)
         else:
             if vote_granted:
-                self._voters.add(m_identifier)
-                if len(self._voters) >= self._quorum:
-                    self._switch_to_leader()
+                self._server_state.add_voter(m_identifier)
+                if self._server_state.number_of_voters() >= self._quorum:
+                    self._server_state.switch_to_leader()
             else:
                 LOG.debug("request vote denied from '%s'" % m_identifier)
 
     def _queue_command_response_if_leader(self, command_id, client_id, errno):
         """Adds a command response to the queue commands if in leader state."""
-        if self._state == Raft._LEADER and client_id:
+        if self._server_state.is_leader() and client_id:
             self._queued_commands[command_id] = (client_id, errno)
 
     def _apply_committed_log_entries_to_state_machine(self):
         """Apply committed log entries to the state machine."""
 
         # if there is no new commands to apply then exit from the function
-        if self._last_applied == self._commit_index:
+        if self._server_state.no_commands_to_apply():
             return
 
-        for index in six.moves.range(self._last_applied + 1,
-                                     self._commit_index + 1):
+        for index in six.moves.range(self._server_state.last_applied() + 1,
+                                     self._server_state.commit_index() + 1):
             _, _, payload = self._log.entry_at_index(index, decode=True)
             command_type, command_id, params = commands.decode_command(
                 payload)
@@ -603,7 +581,7 @@ class Raft(object):
             client_id = self._queued_commands.get(command_id, (None, -1))[0]
 
             try:
-                self._datatree.apply_command(command_type, *params)
+                self._state_machine.apply_command(command_type, *params)
             except datatree.FsmException as e:
                 self._queue_command_response_if_leader(command_id, client_id,
                                                        e.errno)
@@ -611,32 +589,33 @@ class Raft(object):
                 self._queue_command_response_if_leader(command_id, client_id,
                                                        0)
 
-        self._last_applied = self._commit_index
-        LOG.info("commit_index='%s', last_applied='%s'" %
-                 (self._commit_index, self._last_applied))
+        self._server_state.update_last_applied()
 
-    def _broadcast_ae_heartbeat(self):
+    def broadcast_message(self, message_to_send):
+        for remote_server in six.itervalues(self._remote_peers):
+            remote_server.send_message(message_to_send)
+
+    def broadcast_append_entries(self):
         """Broadcast append entries to all peers.
 
-        This method is periodically called by zeromq timer within a period
+        This method is periodically called by ZeroMQ timer within a period
         equals to '_leader_heartbeat_interval' ms.
         """
 
-        if self._state != Raft._LEADER:
-            raise InvalidState(
+        if not self._server_state.is_leader():
+            raise serverstate.InvalidState(
                 "Invalid state '%d' while sending heartbeat.")
-            sys.exit(1)
-        LOG.info("send append entry heartbeat, term='%d'" % self._current_term)
+        LOG.info("send append entry heartbeat, term='%d'" %
+                 self._server_state.term())
 
         # Broadcast an append entry request.
         for remote_server_id in six.iterkeys(self._remote_peers):
-            next_index = self._next_index[remote_server_id]
+            next_index = self._server_state.next_index(remote_server_id)
             p_l_i, p_l_t = self._log.prev_index_and_term_of_entry(next_index)
             entries = self._log.entries_from_index(next_index)
-            ae_request = message.build_append_entry_request(self._current_term,
-                                                            p_l_i, p_l_t,
-                                                            self._commit_index,
-                                                            entries)
+            ae_request = message.build_append_entry_request(
+                self._server_state.term(), p_l_i, p_l_t,
+                self._server_state.commit_index(), entries)
             self._remote_peers[remote_server_id].send_message(ae_request)
 
     def _election_timeout_task(self):
@@ -647,102 +626,19 @@ class Raft(object):
         heartbeats then switch to candidate state.
         """
 
-        if self._state == Raft._LEADER:
-            raise InvalidState(
-                "Invalid state '%d' while checking election timeout.")
-            sys.exit(1)
+        if self._server_state.is_leader():
+            raise serverstate.InvalidState(
+                "Invalid state 'LEADER' while checking election timeout.")
 
-        if not self._leader:
+        if not self._server_state.is_leader_alive():
             if not len(self._remote_endpoints):
-                self._switch_to_leader()
+                self._server_state.switch_to_leader()
                 return
-            self._switch_to_candidate()
-        self._leader = None
+            self._server_state.switch_to_candidate()
+        self._server_state.update_leader(None)
 
-    def _switch_to_leader(self):
-        """Switch to leader state.
-
-        Enable the heartbeat periodic call and
-        stop to check if the leader is still alive.
-        """
-
-        if not self._is_standalone() and self._state != Raft._CANDIDATE:
-            raise InvalidState(
-                "Invalid state '%s' while transiting to leader state." %
-                self._state)
-            sys.exit(1)
-        self._state = Raft._LEADER
-        self._voters.clear()
-        self._voted_for = None
-        LOG.info("switched to leader, term='%d'" % self._current_term)
-
-        for remote_peer in self._remote_peers:
-            self._next_index[remote_peer] = self._log.last_index() + 1
-            self._match_index[remote_peer] = 0
-
-        if not self._is_standalone():
-            self._broadcast_ae_heartbeat()
-            self._heartbeating.start()
-        self._checking_leader_timeout.stop()
-
-        if not self._is_standalone():
-            command_id, noop_message = commands.build_no_operation()
-            self._log.append_entry(self._current_term, noop_message)
-            self._queued_commands[command_id] = (None, -1)
-
-    def _switch_to_follower(self, m_term, m_leader):
-        """Switch to follower state.
-
-        Disable the heartbeat periodic call and
-        start to check if the leader is still alive.
-        :param m_term: The last recent known term.
-        :type m_term: int
-        :param m_leader: The leader if a valid append entry has
-        been received, None otherwise.
-        :type: str
-        """
-
-        if self._state == Raft._LEADER:
-            self._checking_leader_timeout.start()
-            self._heartbeating.stop()
-        self._state = Raft._FOLLOWER
-        self._leader = m_leader
-        self._current_term = max(m_term, self._current_term)
-        self._voters.clear()
-        self._voted_for = None
-        LOG.info("switched to follower, term='%d'" % self._current_term)
-
-    def _switch_to_candidate(self):
-        """Switch to candidate state.
-
-        Increment the current term, vote for self, and broadcast a
-        request vote. The election timeout is randomly reinitialized.
-        """
-
-        if self._state == Raft._LEADER:
-            raise InvalidState(
-                "Invalid state '%s' while transiting to candidate state." %
-                self._state)
-            sys.exit(1)
-        self._current_term += 1
-        self._state = Raft._CANDIDATE
-        LOG.debug("switched to candidate, term='%d'" % self._current_term)
-        self._voters.clear()
-        self._voters.add(self._private_endpoint)
-        self._voted_for = self._private_endpoint
-        l_l_i, l_l_t = self._log.index_and_term_of_last_entry()
-        rv_message = message.build_request_vote(self._current_term, l_l_i,
-                                                l_l_t)
-        # Broadcast request vote.
-        for remote_server in six.itervalues(self._remote_peers):
-            remote_server.send_message(rv_message)
+    def reset_election_timeout(self):
         new_election_timeout = random.randint(self._min_election_timeout,
                                               self._max_election_timeout)
-        self._checking_leader_timeout.callback_time = new_election_timeout
+        self.checking_leader_timeout.callback_time = new_election_timeout
         LOG.debug("new election timeout '%d'ms" % new_election_timeout)
-
-
-class InvalidState(Exception):
-    """Exception raised when the server try to perform an action which
-    is not allowed in its current state.
-    """
