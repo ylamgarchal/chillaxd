@@ -16,7 +16,7 @@
 from __future__ import absolute_import
 import chillaxd
 from chillaxd.raft import server
-from . import log
+from chillaxd import log
 
 import argparse
 import ConfigParser

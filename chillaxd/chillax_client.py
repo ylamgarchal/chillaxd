@@ -15,9 +15,9 @@
 
 from __future__ import absolute_import
 
-from . import commands
-from . import datatree
-from . import log
+from chillaxd import commands
+from chillaxd import datatree
+from chillaxd import log
 
 import argparse
 import logging

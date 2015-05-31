@@ -52,8 +52,8 @@ setuptools.setup(
     ],
     entry_points={
         "console_scripts": [
-            "chillaxd = chillaxd.chillaxd:main",
-            "chillax = chillaxd.chillax:main"
+            "chillaxd = chillaxd.chillax_server:main",
+            "chillax = chillaxd.chillax_client:main"
         ],
     },
 )
